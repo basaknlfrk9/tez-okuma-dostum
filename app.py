@@ -1,43 +1,26 @@
 import streamlit as st
-from openai import OpenAI
-import PyPDF2
 
-st.set_page_config(page_title="Tez Asistanı", layout="wide")
+st.set_page_config(page_title="Kurulum Kontrol")
+st.title("Sorun Tespiti")
 
-st.title("Tez ve Makale Okuma Asistanı")
+st.info("Sistem parcalari kontrol ediliyor...")
 
-if "OPENAI_API_KEY" not in st.secrets:
-    st.error("API Anahtarı bulunamadı!")
-    st.stop()
+try:
+    import openai
+    st.success("1. OpenAI Kutuphanesi: YUKLU")
+except ImportError:
+    st.error("1. OpenAI Kutuphanesi: EKSIK! (requirements dosyasina bak)")
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+try:
+    import PyPDF2
+    st.success("2. PyPDF2 Kutuphanesi: YUKLU")
+except ImportError:
+    st.error("2. PyPDF2 Kutuphanesi: EKSIK! (requirements dosyasina PyPDF2 ekle)")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": "Merhaba! Bana bir PDF yükle, senin için okuyayım."
-        }
-    )
+if "OPENAI_API_KEY" in st.secrets:
+    st.success("3. API Sifresi: MEVCUT")
+else:
+    st.error("3. API Sifresi: YOK")
 
-with st.sidebar:
-    st.header("PDF Yükle")
-    uploaded_file = st.file_uploader(
-        "Dosyayı buraya bırak",
-        type="pdf"
-    )
-
-for msg in st.session_state.messages:
-    if msg["role"] != "system":
-        with st.chat_message(msg["role"]):
-            st.write(msg["content"])
-
-prompt = st.chat_input("Sorunuzu buraya yazın...")
-
-if prompt:
-    st.session_state.messages.append(
-        {"role": "user", "content": prompt}
-    )
-    with st.chat_message("user"):
-        st.write(prompt)
+st.write("---")
+st.warning("Eger yukarida KIRMIZI bir kutu varsa, o sorunu cozmemiz lazim.")
