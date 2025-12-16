@@ -1,20 +1,16 @@
 import streamlit as st
-from openai import OpenAI
-import os
+import requests
 
-st.set_page_config(page_title="Dedektif Modu")
-st.title("Dedektif Modu Açık")
+st.set_page_config(page_title="Kesin Tanı")
+st.title("Kesin Tanı Testi")
 
 if "OPENAI_API_KEY" not in st.secrets:
-    st.error("Sifre Yok!")
+    st.error("Şifre Yok!")
     st.stop()
-else:
-    st.success("Sifre bulundu, sisteme girildi.")
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+api_key = st.secrets["OPENAI_API_KEY"]
 
-prompt = st.chat_input("Bir şey yaz (Örn: Selam)")
+st.write(f"Anahtar Kontrol: {api_key[:7]}...")
 
-if prompt:
-    st.write(f"Sen: {prompt}")
-    st.info("1. Adım: OpenAI baglanmaya calisiyorum...")
+if st.button("Bağlantıyı Test Et"):
+    st.info("Sinyal gönderiliyor...")
