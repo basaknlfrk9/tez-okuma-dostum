@@ -54,7 +54,7 @@ if "user" not in st.session_state:
 else:
     ad = st.session_state.user
     st.sidebar.success(f"Kullanıcı: {ad}")
-    st.title(f"📚 {ad} 'in Okuma Dostu")
+    st.title(f"📚 {ad} için  Okuma Dostu")
 
     if "OPENAI_API_KEY" not in st.secrets:
         st.error("Şifre Yok!")
@@ -112,5 +112,6 @@ else:
             {"role": "assistant", "content": cevap}
         )
         gecmis_kaydet(ad, st.session_state.messages)
+
 
 
