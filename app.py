@@ -149,4 +149,12 @@ else:
                 veriyi_kaydet(st.session_state['ogrenci_adi'], metin_konusu, soru, cevap)
                 
             except Exception as e:
+
                 st.error("Bir hata oluştu. Lütfen öğretmeninize haber verin.")
+                import os
+
+st.sidebar.write("---")
+
+if os.path.exists("tez_verileri.csv"): 
+    with open("tez_verileri.csv", "rb") as f: 
+                st.sidebar.download_button("Verileri İndir", f, "tez_verileri.csv")
