@@ -6,7 +6,7 @@ import os
 import json
 from datetime import datetime
 
-st.set_page_config(page_title="Tez Asistanı", layout="wide")
+st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
 excel_file = "kullanicilar.xlsx"
 
@@ -54,7 +54,7 @@ if "user" not in st.session_state:
 else:
     ad = st.session_state.user
     st.sidebar.success(f"Kullanıcı: {ad}")
-    st.title(f"🎓 {ad} icin Tez Asistani")
+    st.title(f"📚 {ad} icin Okuma Dostum")
 
     if "OPENAI_API_KEY" not in st.secrets:
         st.error("Şifre Yok!")
@@ -112,3 +112,4 @@ else:
             {"role": "assistant", "content": cevap}
         )
         gecmis_kaydet(ad, st.session_state.messages)
+
