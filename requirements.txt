@@ -1,4 +1,4 @@
-sadece 
-şu 
-4 
-kelimeyi
+streamlit 
+openai 
+pypdf 
+python-docx
