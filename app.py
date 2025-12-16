@@ -16,6 +16,7 @@ model="gpt-3.5-turbo",
 messages=[{"role": "user", "content": prompt}]
 )
 st.write(response.choices[0].message.content)
-except Exception as e:
-st.error(f"HATA: {e}")
+    except Exception as e:
+    st.error(f"HATA: {e}")
+
 
