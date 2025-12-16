@@ -1,16 +1,9 @@
 import streamlit as st from openai import OpenAI import os
 
-st.set_page_config(page_title="Hata Testi")
+st.set_page_config(page_title="Hata Testi") st.title("Test Modu")
 
-st.title("⚠️ Hata Yakalama Modu")
-
-if "OPENAI_API_KEY" not in st.secrets: st.error("API Anahtarı bulunamadı! Secrets ayarlarını kontrol et.") st.stop()
+if "OPENAI_API_KEY" not in st.secrets: st.error("Şifre Yok!") st.stop()
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-if "messages" not in st.session_state: st.session_state.messages = []
-
-for msg in st.session_state.messages: with st.chat_message(msg["role"]): st.write(msg["content"])
-
-if prompt := st.chat_input("Bir şey yazın (Örn: Merhaba)"): st.session_state.messages.append({"role": "user", "content": prompt}) with st.chat_message("user"): st.write(prompt)
-
+prompt = st.chat_input("Mesaj yaz...") if prompt: st.write(f"Sen: {prompt}") try: response = client.chat.completions.create( model="gpt-3.5-turbo", messages=[{"role": "user", "content": prompt}] ) st.write(response.choices[0].message.content) except Exception as e: st.error(f"HATA: {e}")
