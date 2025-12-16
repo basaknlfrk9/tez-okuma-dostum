@@ -1,160 +1,35 @@
-import streamlit as st
-from openai import OpenAI
-import datetime
-import csv
-import os
-from pypdf import PdfReader
-import docx
+import streamlit as st from openai import OpenAI import os import json from pypdf import PdfReader from docx import Document
 
-# ==========================================
-# 1. AYARLAR
-# ==========================================
-# Kendi API anahtarını tırnak içine yaz:
-# Anahtarı gizli kasadan (secrets) al
-api_key = st.secrets["OPENAI_API_KEY"]
-client = OpenAI(api_key=api_key)
+--- SAYFA AYARLARI ---
+st.set_page_config(page_title="Tez Okuma Dostum", page_icon="🎓", layout="wide")
 
+--- YAN MENÜ ---
+st.sidebar.title("🎓 Öğrenci Girişi") kullanici_adi = st.sidebar.text_input("Adınız Soyadınız:", placeholder="Örn: Elif Polat")
 
-st.set_page_config(page_title="Okuma Dostum", layout="wide")
+--- FONKSİYONLAR ---
+def gecmisi_yukle(isim): dosya_adi = f"{isim.replace(' ', '_').lower()}_chat.json" if os.path.exists(dosya_adi): with open(dosya_adi, "r", encoding="utf-8") as f: return json.load(f) return []
 
-# ==========================================
-# 2. DOSYA OKUMA FONKSİYONLARI (YENİ)
-# ==========================================
-def metin_oku(yuklenen_dosya):
-    if yuklenen_dosya.type == "text/plain":
-        # TXT Dosyası
-        return str(yuklenen_dosya.read(), "utf-8")
-    elif yuklenen_dosya.type == "application/pdf":
-        # PDF Dosyası
-        pdf_okuyucu = PdfReader(yuklenen_dosya)
-        metin = ""
-        for sayfa in pdf_okuyucu.pages:
-            metin += sayfa.extract_text()
-        return metin
-    elif yuklenen_dosya.type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        # Word Dosyası (docx)
-        doc = docx.Document(yuklenen_dosya)
-        metin = ""
-        for paragraf in doc.paragraphs:
-            metin += paragraf.text + "\n"
-        return metin
-    return ""
+def gecmisi_kaydet(isim, mesajlar): dosya_adi = f"{isim.replace(' ', '_').lower()}_chat.json" with open(dosya_adi, "w", encoding="utf-8") as f: json.dump(mesajlar, f, ensure_ascii=False, indent=4)
 
-# ==========================================
-# 3. KAYIT TUTMA (LOGLAMA - DÜZELTİLMİŞ)
-# ==========================================
-def veriyi_kaydet(ogrenci_adi, metin_konusu, soru, cevap):
-    dosya_adi = "tez_verileri.csv"
-    zaman = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-    dosya_yok = not os.path.exists(dosya_adi)
-    
-    # Excel düzeltmesi (utf-8-sig ve noktalı virgül) burada aktif
-    with open(dosya_adi, mode='a', newline='', encoding='utf-8-sig') as f:
-        yazici = csv.writer(f, delimiter=';')
-        if dosya_yok:
-            yazici.writerow(["Zaman", "Öğrenci Adı", "Metin Konusu", "Öğrenci Sorusu", "Botun Cevabı"])
-        yazici.writerow([zaman, ogrenci_adi, metin_konusu, soru, cevap])
+--- KONTROLLER ---
+if not kullanici_adi: st.info("👋 Lütfen başlamak için sol taraftan adınızı girin.") st.stop()
 
-# ==========================================
-# 4. YAN MENÜ (ÖĞRETMEN PANELİ)
-# ==========================================
-with st.sidebar:
-    st.header("🎓 Araştırmacı Paneli")
-    st.info("Sadeleştirilmiş metni dosya olarak yükleyin.")
-    
-    metin_konusu = st.text_input("Metnin Konusu:", value="Genel Okuma")
-    
-    # --- YENİ DOSYA YÜKLEME ALANI ---
-    yuklenen_dosya = st.file_uploader("Dosya Yükle (PDF, Word veya TXT)", type=["txt", "pdf", "docx"])
-    
-    if yuklenen_dosya is not None:
-        # Dosya yüklendiyse içini oku
-        okuma_metni = metin_oku(yuklenen_dosya)
-        st.success(f"✅ {yuklenen_dosya.name} başarıyla yüklendi!")
-    else:
-        # Yüklenmediyse varsayılanı kullan
-        varsayilan = "Lütfen sol menüden bir dosya yükleyin..."
-        okuma_metni = varsayilan
-        st.warning("Henüz dosya yüklenmedi.")
+if "OPENAI_API_KEY" not in st.secrets: st.error("Lütfen API anahtarınızı ekleyin.") st.stop()
 
-    st.divider()
-    st.caption("Veriler 'tez_verileri.csv' dosyasına kaydediliyor.")
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ==========================================
-# 5. ANA EKRAN (ÖĞRENCİ ARAYÜZÜ)
-# ==========================================
-st.title("🌟 Okuma Dostum")
+st.title(f"Hoş Geldin, {kullanici_adi}! 👋")
 
-if "ogrenci_adi" not in st.session_state:
-    st.session_state["ogrenci_adi"] = ""
+--- GEÇMİŞİ YÜKLE ---
+if "messages" not in st.session_state: eski_kayitlar = gecmisi_yukle(kullanici_adi) if eski_kayitlar: st.session_state.messages = eski_kayitlar else: st.session_state.messages = [] st.session_state.messages.append({"role": "assistant", "content": "Merhaba! Nasıl yardımcı olabilirim?"})
 
-if st.session_state["ogrenci_adi"] == "":
-    st.info("👋 Merhaba! Başlamadan önce ismini yazar mısın?")
-    isim = st.text_input("Adın Soyadın:")
-    if st.button("Başla"):
-        if isim:
-            st.session_state["ogrenci_adi"] = isim
-            st.rerun()
-else:
-    st.success(f"Hoş geldin, {st.session_state['ogrenci_adi']}! 🚀")
-    
-    col1, col2 = st.columns([1, 1])
+--- DOSYA YÜKLEME ---
+uploaded_file = st.sidebar.file_uploader("Dosya Yükle", type=["pdf", "docx", "txt"]) context = ""
 
-    with col1:
-        st.subheader("📖 Okuma Parçası")
-        # Metni kutu içinde gösterelim
-        st.text_area("Metin İçeriği", value=okuma_metni, height=400, disabled=True)
+if uploaded_file: try: if uploaded_file.name.endswith(".pdf"): reader = PdfReader(uploaded_file) for page in reader.pages: context += page.extract_text() elif uploaded_file.name.endswith(".docx"): doc = Document(uploaded_file) for para in doc.paragraphs: context += para.text elif uploaded_file.name.endswith(".txt"): context = uploaded_file.read().decode("utf-8") st.sidebar.success("Dosya analiz edildi!") except: st.sidebar.error("Dosya okunamadı.")
 
-    with col2:
-        st.subheader("💬 Sohbet Arkadaşın")
+--- MESAJLARI GÖSTER ---
+for msg in st.session_state.messages: with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-        if "messages" not in st.session_state:
-            st.session_state["messages"] = [{"role": "assistant", "content": "Metinle ilgili aklına takılan ne varsa sorabilirsin! 👋"}]
-
-        for msg in st.session_state.messages:
-            st.chat_message(msg["role"]).write(msg["content"])
-
-        if soru := st.chat_input("Sorunu buraya yaz..."):
-            st.session_state.messages.append({"role": "user", "content": soru})
-            st.chat_message("user").write(soru)
-
-            # --- GÜNCEL PROMPT (ÇOCUK DOSTU) ---
-            system_prompt = f"""
-            Sen öğrenme güçlüğü yaşayan ortaokul öğrencileri için neşeli, sabırlı bir 'Okuma Arkadaşısın'.
-            Öğrenci: {st.session_state['ogrenci_adi']}
-            Metin: {okuma_metni}
-
-            KURALLAR:
-            1. Çok basit, kısa cümleler kur (10 yaş seviyesi).
-            2. Zor kavramları günlük hayattan benzetmelerle anlat.
-            3. Asla sadece cevabı verme, ipucu vererek yönlendir.
-            4. Bol emoji kullan (🌟, 👍, 🧠).
-            5. Motive edici ol.
-            """
-
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": soru}
-                    ]
-                )
-                cevap = response.choices[0].message.content
-                
-                st.session_state.messages.append({"role": "assistant", "content": cevap})
-                st.chat_message("assistant").write(cevap)
-                
-                # Veriyi kaydet
-                veriyi_kaydet(st.session_state['ogrenci_adi'], metin_konusu, soru, cevap)
-                
-            except Exception as e:
-
-                st.error("Bir hata oluştu. Lütfen öğretmeninize haber verin.")
-                import os
-
-st.sidebar.write("---")
-
-if os.path.exists("tez_verileri.csv"): 
-    with open("tez_verileri.csv", "rb") as f: 
-                st.sidebar.download_button("Verileri İndir", f, "tez_verileri.csv")
+--- SOHBET ---
+if prompt := st.chat_input("Mesajını yaz..."): st.session_state.messages.append({"role": "user", "content": prompt}) with st.chat_message("user"): st.markdown(prompt)
