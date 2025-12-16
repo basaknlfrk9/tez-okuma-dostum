@@ -31,15 +31,15 @@ def kullanici_kaydet(kullanici_adi):
 def gecmis_yukle(kullanici_adi):
     dosya = f"{kullanici_adi}.json"
     if os.path.exists(dosya):
-        with open(dosya, "r") as f:
+        with open(dosya, "r", encoding="utf-8") as f:
             return json.load(f)
     return []
 
 
 def gecmis_kaydet(kullanici_adi, mesajlar):
     dosya = f"{kullanici_adi}.json"
-    with open(dosya, "w") as f:
-        json.dump(mesajlar, f)
+    with open(dosya, "w", encoding="utf-8") as f:
+        json.dump(mesajlar, f, ensure_ascii=False, indent=4)
 
 
 if "user" not in st.session_state:
@@ -54,6 +54,7 @@ if "user" not in st.session_state:
 else:
     ad = st.session_state.user
     st.sidebar.success(f"Kullanıcı: {ad}")
+    st.title(f"🎓 {ad} icin Tez Asistani")
 
     if "OPENAI_API_KEY" not in st.secrets:
         st.error("Şifre Yok!")
@@ -65,23 +66,27 @@ else:
         st.session_state.messages = gecmis_yukle(ad)
         if not st.session_state.messages:
             st.session_state.messages = [
-                {"role": "assistant", "content": "Merhaba!"}
+                {"role": "assistant", "content": "Merhaba! PDF yukle veya sohbete basla."}
             ]
 
     with st.sidebar:
         dosya = st.file_uploader("PDF Yükle", type="pdf")
         if dosya and "okundu" not in st.session_state:
-            okuyucu = PyPDF2.PdfReader(dosya)
-            metin = ""
-            for sayfa in okuyucu.pages:
-                metin += sayfa.extract_text()
-            st.session_state.messages.insert(
-                0,
-                {"role": "system", "content": metin}
-            )
-            st.session_state.okundu = True
-            gecmis_kaydet(ad, st.session_state.messages)
-            st.success("PDF Okundu!")
+            with st.spinner("Okunuyor..."):
+                try:
+                    okuyucu = PyPDF2.PdfReader(dosya)
+                    metin = ""
+                    for sayfa in okuyucu.pages:
+                        metin += sayfa.extract_text()
+                    st.session_state.messages.insert(
+                        0,
+                        {"role": "system", "content": metin}
+                    )
+                    st.session_state.okundu = True
+                    gecmis_kaydet(ad, st.session_state.messages)
+                    st.success("PDF Okundu!")
+                except Exception as e:
+                    st.error(f"Hata: {e}")
 
     for msg in st.session_state.messages:
         if msg["role"] != "system":
