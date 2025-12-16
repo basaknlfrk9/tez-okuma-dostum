@@ -1,57 +1,50 @@
 import streamlit as st
 from openai import OpenAI
 import PyPDF2
+import pandas as pd
+import os
+import json
+from datetime import datetime
 
-st.set_page_config(page_title="Tez Asistanı")
+st.set_page_config(page_title="Tez Asistanı", layout="wide")
 
-st.title("Tez Okuma Asistanı")
+excel_file = "kullanicilar.xlsx"
 
-if "OPENAI_API_KEY" not in st.secrets:
-    st.error("Sifre Yok!")
-    st.stop()
+if not os.path.exists(excel_file):
+    df = pd.DataFrame(columns=["Kullanici Adi", "Tarih"])
+    df.to_excel(excel_file, index=False)
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-with st.sidebar:
-    uploaded_file = st.file_uploader("PDF Yukle", type="pdf")
-
-    if uploaded_file and "okundu" not in st.session_state:
-        reader = PyPDF2.PdfReader(uploaded_file)
-        text = ""
-
-        for page in reader.pages:
-            text += page.extract_text()
-
-        st.session_state.messages.append(
-            {"role": "system", "content": text}
-        )
-        st.session_state.okundu = True
-        st.success("PDF Tamam!")
-
-for msg in st.session_state.messages:
-    if msg["role"] != "system":
-        st.chat_message(msg["role"]).write(msg["content"])
-
-prompt = st.chat_input("Sorunu yaz...")
-
-if prompt:
-    st.chat_message("user").write(prompt)
-    st.session_state.messages.append(
-        {"role": "user", "content": prompt}
-    )
-
+def kullanici_kaydet(kullanici_adi):
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=st.session_state.messages
+        df = pd.read_excel(excel_file)
+        yeni_kayit = pd.DataFrame(
+            [[kullanici_adi, datetime.now().strftime("%Y-%m-%d %H:%M:%S")]],
+            columns=["Kullanici Adi", "Tarih"]
         )
-        msg = response.choices[0].message.content
-        st.chat_message("assistant").write(msg)
-        st.session_state.messages.append(
-            {"role": "assistant", "content": msg}
-        )
+        df = pd.concat([df, yeni_kayit], ignore_index=True)
+        df.to_excel(excel_file, index=False)
     except Exception as e:
-        st.error(e)
+        st.error(f"Excel Hatasi: {e}")
+
+
+def gecmis_yukle(kullanici_adi):
+    dosya_adi = f"{kullanici_adi}_chat.json"
+    if os.path.exists(dosya_adi):
+        with open(dosya_adi, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+
+def gecmis_kaydet(kullanici_adi, mesajlar):
+    dosya_adi = f"{kullanici_adi}_chat.json"
+    with open(dosya_adi, "w", encoding="utf-8") as f:
+        json.dump(mesajlar, f, ensure_ascii=False, indent=4)
+
+
+if "current_user" not in st.session_state:
+    st.title("Giris Yapin")
+    user_input = st.text_input("Adinizi girin:")
+else:
+    kullanici = st.session_state.current_user
+    st.sidebar.success(f"Hosgeldin, {kullanici}")
