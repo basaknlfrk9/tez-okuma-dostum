@@ -3,6 +3,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 from openai import OpenAI
 from datetime import datetime
+import PyPDF2
 
 # -------------------------------------------------
 # SAYFA AYARLARI
@@ -10,7 +11,7 @@ from datetime import datetime
 st.set_page_config(
     page_title="Tez Okuma Dostum",
     page_icon="📘",
-    layout="centered"
+    layout="wide"
 )
 
 st.title("📘 Tez Okuma Dostum")
@@ -21,7 +22,7 @@ st.title("📘 Tez Okuma Dostum")
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # -------------------------------------------------
-# GOOGLE SHEETS BAĞLANTISI (STABLE YÖNTEM)
+# GOOGLE SHEETS BAĞLANTISI
 # -------------------------------------------------
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -70,12 +71,33 @@ if "kullanici" not in st.session_state:
 if st.session_state.kullanici == "":
     kullanici_adi = st.text_input("👤 Kullanıcı adını gir")
 
-    if st.button("Giriş Yap") and kullanici_adi.strip() != "":
+    if st.button("Giriş Yap") and kullanici_adi.strip():
         st.session_state.kullanici = kullanici_adi
         st.session_state.messages = gecmisi_yukle(kullanici_adi)
         st.rerun()
 
     st.stop()
+
+# -------------------------------------------------
+# SIDEBAR – PDF
+# -------------------------------------------------
+st.sidebar.header("📄 PDF Yükle")
+pdf_file = st.sidebar.file_uploader(
+    "PDF dosyası seç",
+    type=["pdf"]
+)
+
+if "pdf_text" not in st.session_state:
+    st.session_state.pdf_text = ""
+
+if pdf_file:
+    reader = PyPDF2.PdfReader(pdf_file)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
+
+    st.session_state.pdf_text = text
+    st.sidebar.success("PDF yüklendi")
 
 # -------------------------------------------------
 # CHAT GEÇMİŞİ
@@ -93,7 +115,6 @@ for msg in st.session_state.messages:
 prompt = st.chat_input("Sorunu yaz...")
 
 if prompt:
-    # kullanıcı mesajı
     st.session_state.messages.append({
         "role": "user",
         "content": prompt
@@ -104,10 +125,20 @@ if prompt:
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # openai cevap
+    context = ""
+    if st.session_state.pdf_text:
+        context = (
+            "Aşağıdaki metin bir PDF içeriğidir. "
+            "Soruyu yanıtlarken bu içeriği dikkate al:\n\n"
+            + st.session_state.pdf_text[:4000]
+        )
+
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=st.session_state.messages
+        messages=[
+            {"role": "system", "content": context},
+            *st.session_state.messages
+        ]
     )
 
     cevap = response.choices[0].message.content
