@@ -1,165 +1,154 @@
 import streamlit as st
-import gspread
-from google.oauth2.service_account import Credentials
-from openai import OpenAI
-from datetime import datetime
-import PyPDF2
+import pyttsx3
 
-# -------------------------------------------------
+# -----------------------------
 # SAYFA AYARLARI
-# -------------------------------------------------
+# -----------------------------
 st.set_page_config(
     page_title="Okuma Dostum",
     page_icon="📘",
-    layout="wide"
+    layout="centered"
 )
 
+# -----------------------------
+# STİL (ÖÖG DOSTU)
+# -----------------------------
+st.markdown("""
+<style>
+.main {
+    background-color: #F7F9FC;
+}
+.info-box {
+    background-color: #E8F0FE;
+    padding: 20px;
+    border-radius: 16px;
+    margin-bottom: 20px;
+    font-size: 18px;
+    color: #2E3440;
+}
+.welcome-box {
+    background-color: #DDE7FF;
+    padding: 18px;
+    border-radius: 14px;
+    font-size: 20px;
+    color: #2E3440;
+    text-align: center;
+}
+.card {
+    background-color: #FFFFFF;
+    padding: 20px;
+    border-radius: 16px;
+    margin-top: 15px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------------
+# SESSION STATE
+# -----------------------------
+if "giris" not in st.session_state:
+    st.session_state.giris = False
+
+# -----------------------------
+# BAŞLIK
+# -----------------------------
 st.title("📘 Okuma Dostum")
 
-# -------------------------------------------------
-# OPENAI
-# -------------------------------------------------
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# -----------------------------
+# GİRİŞ EKRANI
+# -----------------------------
+if not st.session_state.giris:
 
-# -------------------------------------------------
-# GOOGLE SHEETS BAĞLANTISI
-# -------------------------------------------------
-scope = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
-]
+    st.markdown("""
+    <div class="info-box">
+    👋 <b>Okuma Dostum</b> ile metinleri birlikte anlayalım.<br><br>
+    🅰️ Metni basitleştiririm<br>
+    🅱️ Madde madde açıklarım<br>
+    🔊 İstersen seslendiririm<br>
+    🎯 Mini sorularla anladığını kontrol ederiz
+    </div>
+    """, unsafe_allow_html=True)
 
-credentials = Credentials.from_service_account_info(
-    st.secrets["gsheets"],
-    scopes=scope
-)
+    kullanici = st.text_input("Adını yaz dostum 🌱")
 
-gc = gspread.authorize(credentials)
-sheet = gc.open_by_key(
-    st.secrets["SPREADSHEET_ID"]
-).sheet1
+    if st.button("Giriş Yap"):
+        if kullanici.strip() != "":
+            st.session_state.giris = True
+            st.session_state.kullanici = kullanici
+            st.rerun()
+        else:
+            st.warning("Lütfen adını yaz 😊")
 
-# -------------------------------------------------
-# YARDIMCI FONKSİYONLAR
-# -------------------------------------------------
-def tabloya_yaz(kullanici, tip, mesaj):
-    sheet.append_row([
-        datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-        kullanici,
-        tip,
-        mesaj
-    ])
+# -----------------------------
+# ANA SAYFA
+# -----------------------------
+else:
+    st.markdown(f"""
+    <div class="welcome-box">
+    🤍 Hoş geldin dostum, <b>{st.session_state.kullanici}</b><br>
+    Bugün birlikte okumaya hazırız
+    </div>
+    """, unsafe_allow_html=True)
 
-def gecmisi_yukle(kullanici):
-    rows = sheet.get_all_records()
-    mesajlar = []
+    st.markdown("### 📖 Okumak istediğin metni buraya yapıştır")
 
-    for r in rows:
-        if r["Kullanici"] == kullanici and r["Tip"] in ["USER", "BOT"]:
-            mesajlar.append({
-                "role": "user" if r["Tip"] == "USER" else "assistant",
-                "content": r["Mesaj"]
-            })
-    return mesajlar
-
-# -------------------------------------------------
-# LOGIN
-# -------------------------------------------------
-if "kullanici" not in st.session_state:
-    st.session_state.kullanici = ""
-
-if st.session_state.kullanici == "":
-    isim = st.text_input("👤 Adını yaz")
-
-    if st.button("Giriş Yap") and isim.strip():
-        st.session_state.kullanici = isim
-        st.session_state.messages = gecmisi_yukle(isim)
-        st.rerun()
-
-    st.stop()
-
-# 👋 GİRİŞ SONRASI MESAJ
-st.success(f"🤍 Hoş geldin dostum, {st.session_state.kullanici}")
-
-# -------------------------------------------------
-# SIDEBAR – PDF
-# -------------------------------------------------
-st.sidebar.header("📄 PDF Yükle")
-pdf_file = st.sidebar.file_uploader(
-    "PDF dosyası seç",
-    type=["pdf"]
-)
-
-if "pdf_text" not in st.session_state:
-    st.session_state.pdf_text = ""
-
-if pdf_file:
-    reader = PyPDF2.PdfReader(pdf_file)
-    text = ""
-    for page in reader.pages:
-        text += page.extract_text() or ""
-
-    st.session_state.pdf_text = text
-    st.sidebar.success("PDF yüklendi")
-
-# -------------------------------------------------
-# CHAT GEÇMİŞİ
-# -------------------------------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = gecmisi_yukle(st.session_state.kullanici)
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-
-# -------------------------------------------------
-# CHAT INPUT
-# -------------------------------------------------
-prompt = st.chat_input("Sorunu yaz...")
-
-if prompt:
-    st.session_state.messages.append({
-        "role": "user",
-        "content": prompt
-    })
-
-    tabloya_yaz(st.session_state.kullanici, "USER", prompt)
-
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    context = ""
-    if st.session_state.pdf_text:
-        context = (
-            "Aşağıdaki metin bir PDF içeriğidir. "
-            "Soruyu yanıtlarken bu içeriği dikkate al:\n\n"
-            + st.session_state.pdf_text[:4000]
-        )
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": context},
-            *st.session_state.messages
-        ]
+    metin = st.text_area(
+        "Metin",
+        height=200,
+        placeholder="Buraya metni yapıştırabilirsin..."
     )
 
-    cevap = response.choices[0].message.content
+    col1, col2, col3 = st.columns(3)
 
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": cevap
-    })
+    # -----------------------------
+    # 🅰️ BASİTLEŞTİR
+    # -----------------------------
+    with col1:
+        if st.button("🅰️ Basitleştir"):
+            if metin:
+                st.markdown("<div class='card'><b>Basitleştirilmiş Anlatım</b><br><br>"
+                            "Bu metin daha kısa cümlelerle ve kolay kelimelerle anlatılmıştır.<br><br>"
+                            f"{metin[:300]}...</div>", unsafe_allow_html=True)
 
-    tabloya_yaz(st.session_state.kullanici, "BOT", cevap)
+    # -----------------------------
+    # 🅱️ MADDE MADDE
+    # -----------------------------
+    with col2:
+        if st.button("🅱️ Madde Madde"):
+            if metin:
+                st.markdown("<div class='card'><b>Madde Madde Açıklama</b><br><br>"
+                            "• Metnin ana konusu nedir?<br>"
+                            "• Kimden veya neden bahsediliyor?<br>"
+                            "• En önemli bilgi hangisi?</div>", unsafe_allow_html=True)
 
-    with st.chat_message("assistant"):
-        st.markdown(cevap)
+    # -----------------------------
+    # 🔊 METNİ SESLENDİR
+    # -----------------------------
+    with col3:
+        if st.button("🔊 Seslendir"):
+            if metin:
+                engine = pyttsx3.init()
+                engine.say(metin)
+                engine.runAndWait()
+                st.success("Metin seslendirildi 🎧")
 
-# -------------------------------------------------
-# ÇIKIŞ
-# -------------------------------------------------
-st.divider()
-if st.button("🚪 Çıkış Yap"):
-    st.session_state.clear()
-    st.rerun()
+    # -----------------------------
+    # 🎯 OKUDUĞUNU ANLAMA ETKİNLİĞİ
+    # -----------------------------
+    if metin:
+        st.markdown("### 🎯 Mini Okuduğunu Anlama")
+
+        soru = st.radio(
+            "Metne göre hangisi doğrudur?",
+            [
+                "Metnin ana fikri anlatılmıştır",
+                "Metin tamamen gereksizdir",
+                "Metinde hiçbir bilgi yoktur"
+            ]
+        )
+
+        if st.button("Cevabımı Gönder"):
+            if soru == "Metnin ana fikri anlatılmıştır":
+                st.success("🎉 Harika! Doğru cevap")
+            else:
+                st.warning("Tekrar düşünelim dostum 💙")
