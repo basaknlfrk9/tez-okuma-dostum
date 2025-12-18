@@ -128,13 +128,11 @@ else:
     soru = st.chat_input("Sorunu yaz")
 
     if soru:
-        # ekranda göster
         with st.chat_message("user"):
             st.write(soru)
 
         log_yaz(st.session_state.user, "USER", soru)
 
-        # modlara göre kullanıcı isteği
         kullanici_istegi = soru
         if sade:
             kullanici_istegi = (
@@ -144,7 +142,6 @@ else:
         if maddeler:
             kullanici_istegi = "Cevabı madde madde yaz. " + kullanici_istegi
 
-        # PDF + ekstra metni bağlama ekle
         icerik = ""
         if pdf_text:
             icerik += "PDF metni:\n" + pdf_text[:2000] + "\n\n"
@@ -164,7 +161,6 @@ else:
 
         st.session_state.messages.append({"role": "user", "content": tam_soru})
 
-        # -------- OPENAI İSTEK --------
         with st.chat_message("assistant"):
             try:
                 response = client.chat.completions.create(
@@ -184,14 +180,3 @@ else:
 
             except Exception as e:
                 st.error(f"Hata: {e}")
-
-    # -------- SON KAYITLARI GÖSTER (İSTEĞE BAĞLI) --------
-    st.divider()
-    if st.checkbox("📊 Son 10 kaydımı göster"):
-        try:
-            rows = sheet.get_all_records()
-            df = pd.DataFrame(rows)
-            df = df[df["Kullanici"] == st.session_state.user]
-            st.dataframe(df.tail(10))
-        except Exception as e:
-            st.error(f"Loglar okunurken hata: {e}")
