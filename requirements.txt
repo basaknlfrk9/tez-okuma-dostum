@@ -1,4 +1,7 @@
 streamlit
 openai
 PyPDF2
+pandas
+streamlit-gsheets
+
 
