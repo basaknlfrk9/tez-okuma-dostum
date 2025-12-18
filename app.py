@@ -4,11 +4,11 @@ import PyPDF2
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
-st.title("📚 Okuma Dostum")
+# (Başlık girişten sonra gösterilecek)
 
 # ------------------ GİRİŞ KONTROLÜ ------------------
 if "user" not in st.session_state:
-    st.title("📚 Okuma Dostum")
+    # (Başlık girişten sonra gösterilecek)
     isim = st.text_input("Adınızı yazın:")
 
     if st.button("Giriş Yap") and isim:
@@ -17,22 +17,22 @@ if "user" not in st.session_state:
         st.rerun()
 
 else:
+    st.title("📚 Okuma Dostum")
     st.sidebar.success(f"Hoş geldin {st.session_state.user}")
 
     if st.sidebar.button("Çıkış Yap"):
         st.session_state.clear()
         st.rerun()
-
-    # ------------------ PDF YÜKLEME ------------------
-    st.header("📄 Dosya Analizi ve Sohbet")
-    file = st.file_uploader("PDF Yükleyin", type="pdf")
+    # ------------------ PDF YÜKLEME (SIDEBAR) ------------------
+    st.sidebar.header("📄 PDF Yükleme")
+    file = st.sidebar.file_uploader("PDF Yükleyin", type="pdf")
 
     icerik = ""
     if file:
         pdf = PyPDF2.PdfReader(file)
         for sayfa in pdf.pages:
             icerik += sayfa.extract_text() or ""
-        st.info("PDF Okundu!")
+        st.sidebar.success("PDF Okundu!")
 
     # ------------------ CHATBOT ------------------
     if "OPENAI_API_KEY" not in st.secrets:
