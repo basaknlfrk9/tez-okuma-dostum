@@ -3,9 +3,11 @@ import pandas as pd
 from datetime import datetime
 from openai import OpenAI
 import PyPDF2
+import gspread
+from google.oauth2.service_account import Credentials
 
 # --------------------------------------------------
-# SAYFA AYARI
+# SAYFA
 # --------------------------------------------------
 st.set_page_config(page_title="📚 Okuma Dostum", layout="wide")
 
@@ -15,27 +17,38 @@ st.set_page_config(page_title="📚 Okuma Dostum", layout="wide")
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # --------------------------------------------------
-# GSHEETS BAĞLANTISI (4. ADIM BURASI 👇)
+# GOOGLE SHEETS MANUEL BAĞLANTI (KESİN ÇALIŞAN)
 # --------------------------------------------------
-conn = st.connection("gsheets", type="gsheets")
+creds_dict = st.secrets["connections"]["gsheets"]["credentials"]
 
+credentials = Credentials.from_service_account_info(
+    creds_dict,
+    scopes=["https://www.googleapis.com/auth/spreadsheets"]
+)
+
+gc = gspread.authorize(credentials)
+sheet = gc.open_by_url(
+    st.secrets["connections"]["gsheets"]["spreadsheet"]
+).sheet1
 
 # --------------------------------------------------
 # YARDIMCI FONKSİYONLAR
 # --------------------------------------------------
 def tabloya_yaz(kullanici, tip, mesaj):
-    df = conn.read(worksheet=0)
-    yeni = pd.DataFrame([{
-        "Zaman": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "Kullanici": kullanici,
-        "Tip": tip,
-        "Mesaj": mesaj
-    }])
-    df = pd.concat([df, yeni], ignore_index=True)
-    conn.update(worksheet=0, data=df)
+    sheet.append_row([
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        kullanici,
+        tip,
+        mesaj
+    ])
 
 def gecmisi_yukle(kullanici):
-    df = conn.read(worksheet=0)
+    data = sheet.get_all_records()
+    df = pd.DataFrame(data)
+
+    if df.empty:
+        return []
+
     df = df[df["Kullanici"] == kullanici]
     df = df[df["Tip"].isin(["USER", "BOT"])]
 
@@ -46,7 +59,7 @@ def gecmisi_yukle(kullanici):
     return mesajlar
 
 # --------------------------------------------------
-# GİRİŞ EKRANI
+# GİRİŞ
 # --------------------------------------------------
 if "user" not in st.session_state:
     st.title("📚 Okuma Dostum")
@@ -61,7 +74,7 @@ if "user" not in st.session_state:
         st.rerun()
 
 # --------------------------------------------------
-# ANA EKRAN
+# ANA
 # --------------------------------------------------
 else:
     st.sidebar.success(f"👋 Hoş geldin {st.session_state.user}")
@@ -72,7 +85,7 @@ else:
         st.session_state.clear()
         st.rerun()
 
-    # PDF YÜKLEME
+    # PDF
     st.sidebar.header("📄 PDF Yükle")
     file = st.sidebar.file_uploader("PDF seç", type="pdf")
     pdf_text = ""
@@ -82,12 +95,12 @@ else:
         for p in pdf.pages:
             pdf_text += p.extract_text() or ""
 
-    # GEÇMİŞ SOHBET
+    # GEÇMİŞ
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
-    # YENİ SORU
+    # SORU
     if soru := st.chat_input("Sorunu yaz"):
         st.session_state.messages.append({"role": "user", "content": soru})
         tabloya_yaz(st.session_state.user, "USER", soru)
@@ -105,4 +118,3 @@ else:
             {"role": "assistant", "content": cevap}
         )
         tabloya_yaz(st.session_state.user, "BOT", cevap)
-
