@@ -5,9 +5,9 @@ import PyPDF2
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
 if "user" not in st.session_state:
-    st.title("Okuma Dostum'a Hoş Geldiniz")
+    st.title("📚 Okuma Dostum")
 
-    with st.form("giris_formu"):
+    with st.form("giris"):
         isim = st.text_input("Adınızı yazın:")
 
         if st.form_submit_button("Giriş Yap") and isim:
