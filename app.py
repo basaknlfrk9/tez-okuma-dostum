@@ -11,7 +11,7 @@ st.set_page_config(page_title="Okuma Dostum", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def tabloya_yaz(kullanici, mesaj_tipi, icerik):
-    def gecmisi_yukle(kullanici):
+   def gecmisi_yukle(kullanici):
     try:
         df = conn.read(ttl=0)
         df = df[df["Kullanici"] == kullanici]
@@ -19,14 +19,7 @@ def tabloya_yaz(kullanici, mesaj_tipi, icerik):
 
         mesajlar = []
         for _, row in df.iterrows():
-            role = "user" if row["Tip"] == "USER" else "assistant"
-            mesajlar.append({
-                "role": role,
-                "content": row["Mesaj"]
-            })
-        return mesajlar
-    except:
-        return []
+            role = "user" if row["Tip"]
 
     try:
         df = conn.read(ttl=0)
@@ -107,4 +100,5 @@ else:
 
             st.session_state.messages.append({"role": "assistant", "content": cevap})
             tabloya_yaz(st.session_state.user, "BOT", cevap)
+
 
