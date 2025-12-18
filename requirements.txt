@@ -1,5 +1,7 @@
 streamlit
 pandas
+PyPDF2
+openai>=1.0.0
 gspread
 google-auth
 
