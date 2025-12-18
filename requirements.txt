@@ -4,5 +4,7 @@ gspread
 google-auth
 pandas
 PyPDF2
+gtts
+
 
 
