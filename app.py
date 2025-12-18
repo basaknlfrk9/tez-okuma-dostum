@@ -19,3 +19,4 @@ else:
     if st.sidebar.button("Çıkış Yap"):
         st.session_state.clear()
         st.rerun()
+
