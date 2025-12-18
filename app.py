@@ -1,3 +1,5 @@
+st.write("GSHEETS OK")
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -145,3 +147,4 @@ else:
         "okuma_dostum_loglari.csv",
         "text/csv"
     )
+
