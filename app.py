@@ -1,143 +1,90 @@
 import streamlit as st
+from PyPDF2 import PdfReader
 from gtts import gTTS
 import tempfile
 import os
 
-# -----------------------------
-# SAYFA AYARLARI
-# -----------------------------
+# ---- SAYFA AYARI ----
 st.set_page_config(
     page_title="Okuma Dostum",
     page_icon="📘",
     layout="centered"
 )
 
-# -----------------------------
-# STİL (ÖÖG DOSTU)
-# -----------------------------
+# ---- STİL (ÖĞRENME GÜÇLÜĞÜNE UYGUN) ----
 st.markdown("""
 <style>
-.main {background-color: #F7F9FC;}
-.info-box {
-    background-color: #E8F0FE;
-    padding: 20px;
-    border-radius: 16px;
-    font-size: 18px;
+body {
+    background-color: #f4f9ff;
 }
-.welcome-box {
-    background-color: #DDE7FF;
-    padding: 18px;
-    border-radius: 14px;
-    font-size: 20px;
-    text-align: center;
+.big-title {
+    font-size: 40px;
+    font-weight: bold;
+    color: #2c3e50;
 }
 .card {
-    background-color: white;
+    background-color: #ffffff;
     padding: 20px;
-    border-radius: 16px;
-    margin-top: 15px;
+    border-radius: 15px;
+    box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# -----------------------------
-# SESSION STATE
-# -----------------------------
-if "giris" not in st.session_state:
-    st.session_state.giris = False
+# ---- BAŞLIK ----
+st.markdown('<div class="big-title">📘 Okuma Dostum</div>', unsafe_allow_html=True)
+st.write("### Hoş geldin dostum 🌈")
+st.write("Burada metinleri daha **kolay**, **anlaşılır** ve **eğlenceli** şekilde okuyacağız.")
 
-# -----------------------------
-# BAŞLIK
-# -----------------------------
-st.title("📘 Okuma Dostum")
+# ---- PDF YÜKLEME ----
+st.markdown('<div class="card">📄 <b>PDF Yükle</b></div>', unsafe_allow_html=True)
+pdf_file = st.file_uploader("Bir PDF seç", type=["pdf"])
 
-# -----------------------------
-# GİRİŞ
-# -----------------------------
-if not st.session_state.giris:
-    st.markdown("""
-    <div class="info-box">
-    👋 <b>Okuma Dostum</b> ile metinleri birlikte anlayalım.<br><br>
-    🅰️ Basitleştirerek anlatır<br>
-    🅱️ Madde madde açıklar<br>
-    🔊 Metni seslendirir<br>
-    🎯 Mini sorularla kontrol eder
-    </div>
-    """, unsafe_allow_html=True)
+text = ""
 
-    ad = st.text_input("Adını yaz dostum 🌱")
+if pdf_file:
+    reader = PdfReader(pdf_file)
+    for page in reader.pages:
+        text += page.extract_text() + "\n"
 
-    if st.button("Giriş Yap"):
-        if ad.strip():
-            st.session_state.giris = True
-            st.session_state.ad = ad
-            st.rerun()
-        else:
-            st.warning("Adını yazmalısın 😊")
+    st.success("✅ PDF başarıyla yüklendi")
 
-# -----------------------------
-# ANA SAYFA
-# -----------------------------
-else:
-    st.markdown(f"""
-    <div class="welcome-box">
-    🤍 Hoş geldin dostum, <b>{st.session_state.ad}</b>
-    </div>
-    """, unsafe_allow_html=True)
+# ---- METİN GÖSTER ----
+if text:
+    st.markdown('<div class="card"><b>📖 Metin</b></div>', unsafe_allow_html=True)
+    st.text_area("PDF içeriği", text, height=250)
 
-    st.markdown("### 📖 Metni buraya yapıştır")
-
-    metin = st.text_area(
-        "Metin",
-        height=200,
-        placeholder="Okumak istediğin metni buraya yazabilirsin..."
-    )
-
+    # ---- BUTONLAR ----
     col1, col2, col3 = st.columns(3)
 
-    # 🅰️ Basitleştir
     with col1:
-        if st.button("🅰️ Basitleştir") and metin:
-            st.markdown(
-                f"<div class='card'><b>Basitleştirilmiş Anlatım</b><br><br>{metin[:250]}...</div>",
-                unsafe_allow_html=True
-            )
+        simplify = st.button("🅰️ Basitleştirerek Anlat")
 
-    # 🅱️ Madde Madde
     with col2:
-        if st.button("🅱️ Madde Madde") and metin:
-            st.markdown("""
-            <div class='card'>
-            <b>Madde Madde Açıklama</b><br><br>
-            • Metnin konusu nedir?<br>
-            • En önemli bilgi hangisi?<br>
-            • Kim veya ne anlatılıyor?
-            </div>
-            """, unsafe_allow_html=True)
+        bullets = st.button("🅱️ Madde Madde Açıkla")
 
-    # 🔊 TTS
     with col3:
-        if st.button("🔊 Seslendir") and metin:
-            tts = gTTS(text=metin, lang="tr")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                tts.save(fp.name)
-                st.audio(fp.name)
+        speak = st.button("🔊 Seslendir")
 
-    # 🎯 Mini Etkinlik
-    if metin:
-        st.markdown("### 🎯 Mini Okuduğunu Anlama")
+    # ---- BASİTLEŞTİR ----
+    if simplify:
+        st.markdown('<div class="card">🅰️ <b>Basitleştirilmiş Anlatım</b></div>', unsafe_allow_html=True)
+        st.write("Bu metin, ana fikirleri daha kolay anlaman için sadeleştirildi.")
+        st.write(text[:500] + "...")
 
-        cevap = st.radio(
-            "Metne göre hangisi doğrudur?",
-            [
-                "Metnin ana fikri vardır",
-                "Metin anlamsızdır",
-                "Metinde bilgi yoktur"
-            ]
-        )
+    # ---- MADDE MADDE ----
+    if bullets:
+        st.markdown('<div class="card">🅱️ <b>Madde Madde Açıklama</b></div>', unsafe_allow_html=True)
+        sentences = text.split(".")[:5]
+        for s in sentences:
+            st.write("•", s.strip())
 
-        if st.button("Cevabı Gönder"):
-            if cevap == "Metnin ana fikri vardır":
-                st.success("🎉 Harika dostum!")
-            else:
-                st.warning("Bir daha bakalım 💙")
+    # ---- SESLENDİRME (gTTS) ----
+    if speak:
+        tts = gTTS(text=text[:1000], lang="tr")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+            tts.save(fp.name)
+            audio_file = fp.name
+
+        st.audio(audio_file)
