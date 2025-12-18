@@ -15,21 +15,29 @@ st.set_page_config(page_title="📚 Okuma Dostum", layout="wide")
 # -------------------------------------------------
 # GOOGLE SHEETS BAĞLANTI
 # -------------------------------------------------
+import json
+import gspread
+from google.oauth2.service_account import Credentials
+import streamlit as st
+
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
+creds_dict = json.loads(st.secrets["GSHEETS_CREDENTIALS"])
+
 credentials = Credentials.from_service_account_info(
-    st.secrets["connections"]["gsheets"],
-    scopes=scope,
+    creds_dict,
+    scopes=scope
 )
 
 gc = gspread.authorize(credentials)
 
 sheet = gc.open_by_key(
-    st.secrets["connections"]["gsheets"]["spreadsheet_id"]
+    st.secrets["SPREADSHEET_ID"]
 ).sheet1
+
 
 # -------------------------------------------------
 # YARDIMCI FONKSİYONLAR
@@ -152,3 +160,4 @@ else:
         )
     else:
         st.info("Henüz veri yok.")
+
