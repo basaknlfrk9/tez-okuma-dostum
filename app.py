@@ -1,20 +1,19 @@
 import streamlit as st
-import openai
-import PyPDF2
+from PyPDF2 import PdfReader
 from datetime import datetime
-import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+from openai import OpenAI
 
-# ------------------ AYARLAR ------------------
+# ------------------ SAYFA AYARI ------------------
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
 st.title("📚 Okuma Dostum")
 
-# ------------------ OPENAI ------------------
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# ------------------ OPENAI CLIENT (YENİ SÜRÜM) ------------------
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ------------------ GOOGLE SHEETS ------------------
+# ------------------ GOOGLE SHEETS BAĞLANTISI ------------------
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -32,6 +31,7 @@ sheet = gc.open_by_url(
 
 
 def log_yaz(kullanici, tip, mesaj):
+    """Kullanıcı hareketlerini Google Sheet'e yazar."""
     sheet.append_row([
         datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
         kullanici,
@@ -40,14 +40,14 @@ def log_yaz(kullanici, tip, mesaj):
     ])
 
 
-# ------------------ GİRİŞ ------------------
+# ------------------ GİRİŞ EKRANI ------------------
 if "user" not in st.session_state:
     st.subheader("👋 Hoş geldin Dostum")
     isim = st.text_input("Adını yaz:")
 
-    if st.button("Giriş Yap") and isim:
-        st.session_state.user = isim
-        st.session_state.messages = []
+    if st.button("Giriş Yap") and isim.strip():
+        st.session_state.user = isim.strip()
+        st.session_state.messages = []  # sohbet geçmişi (oturum içi)
         log_yaz(isim, "SİSTEM", "Giriş yaptı")
         st.rerun()
 
@@ -55,58 +55,88 @@ if "user" not in st.session_state:
 else:
     st.sidebar.success(f"Hoş geldin dostum 🌈 {st.session_state.user}")
 
+    # Çıkış
     if st.sidebar.button("Çıkış Yap"):
         log_yaz(st.session_state.user, "SİSTEM", "Çıkış yaptı")
         st.session_state.clear()
         st.rerun()
 
-    # -------- PDF --------
+    # -------- PDF YÜKLEME --------
     st.sidebar.header("📄 PDF Yükle")
     pdf_text = ""
-
     pdf_file = st.sidebar.file_uploader("PDF seç", type="pdf")
-    if pdf_file:
-        reader = PyPDF2.PdfReader(pdf_file)
-        for page in reader.pages:
-            pdf_text += page.extract_text() or ""
 
-    # -------- METİN --------
+    if pdf_file is not None:
+        reader = PdfReader(pdf_file)
+        for page in reader.pages:
+            txt = page.extract_text()
+            if txt:
+                pdf_text += txt + "\n"
+
+    # -------- METİN YAPIŞTIRMA --------
     st.sidebar.header("📝 Metin Yapıştır")
-    extra_text = st.sidebar.text_area("Metni buraya yapıştır")
+    extra_text = st.sidebar.text_area("Metni buraya yapıştır", height=150)
 
     # -------- MODLAR --------
     st.sidebar.header("⚙️ Modlar")
     sade = st.sidebar.checkbox("🅰️ Basitleştirerek anlat")
     maddeler = st.sidebar.checkbox("🅱️ Madde madde açıkla")
 
-    # -------- CHAT GEÇMİŞİ --------
+    # -------- SOHBET GEÇMİŞİNİ ÇİZ --------
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
-    # -------- SORU --------
-    if soru := st.chat_input("Sorunu yaz"):
-        prompt = soru
+    # -------- SORU AL --------
+    soru = st.chat_input("Sorunu yaz")
 
-        if sade:
-            prompt = "Basit ve anlaşılır şekilde anlat: " + prompt
-        if maddeler:
-            prompt = "Madde madde açıkla: " + prompt
-        if pdf_text:
-            prompt = f"PDF içeriği:\n{pdf_text[:2000]}\n\nSoru: {prompt}"
-        if extra_text:
-            prompt = f"Metin:\n{extra_text[:2000]}\n\nSoru: {prompt}"
+    if soru:
+        # Kullanıcıya gösterdiğimiz soru (orijinal)
+        with st.chat_message("user"):
+            st.write(soru)
 
-        st.session_state.messages.append(
-            {"role": "user", "content": prompt}
-        )
         log_yaz(st.session_state.user, "USER", soru)
 
+        # MODEL İÇİN PROMPT HAZIRLAMA
+        kullanici_istegi = soru
+        if sade:
+            kullanici_istegi = "Bu soruyu 5. sınıf seviyesinde, basit ve kısa cümlelerle açıkla:\n" + kullanici_istegi
+        if maddeler:
+            kullanici_istegi = "Cevabı madde madde yaz. " + kullanici_istegi
+
+        icerik = ""
+        if pdf_text:
+            icerik += "PDF metni:\n" + pdf_text[:2000] + "\n\n"
+        if extra_text:
+            icerik += "Ek metin:\n" + extra_text[:2000] + "\n\n"
+
+        if icerik:
+            tam_soru = icerik + "Öğrencinin sorusu:\n" + kullanici_istegi
+        else:
+            tam_soru = kullanici_istegi
+
+        # Sistem mesajı: özel öğrenme güçlüğü yaşayan öğrenciye uygun anlat
+        system_prompt = (
+            "Sen özel öğrenme güçlüğü (disleksi vb.) yaşayan 5-8. sınıf öğrencileri için "
+            "okuma dostu bir yardımcı öğretmensin. Açıklamalarını sade, kısa cümlelerle, "
+            "gerektiğinde örnek vererek yap. Akademik terimleri mümkünse daha basit kelimelerle açıkla."
+        )
+
+        # Konuşma geçmişine yeni user mesajını ekle
+        st.session_state.messages.append({"role": "user", "content": tam_soru})
+
+        # -------- OPENAI İSTEK (YENİ API) --------
         with st.chat_message("assistant"):
             try:
-                response = openai.ChatCompletion.create(
+                response = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=st.session_state.messages
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        *st.session_state.messages
+                    ]
                 )
 
                 cevap = response.choices[0].message.content
