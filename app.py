@@ -9,15 +9,15 @@ import PyPDF2
 # SAYFA AYARLARI
 # -------------------------------------------------
 st.set_page_config(
-    page_title="Tez Okuma Dostum",
+    page_title="Okuma Dostum",
     page_icon="📘",
     layout="wide"
 )
 
-st.title("📘 Tez Okuma Dostum")
+st.title("📘 Okuma Dostum")
 
 # -------------------------------------------------
-# OPENAI CLIENT
+# OPENAI
 # -------------------------------------------------
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -69,14 +69,17 @@ if "kullanici" not in st.session_state:
     st.session_state.kullanici = ""
 
 if st.session_state.kullanici == "":
-    kullanici_adi = st.text_input("👤 Kullanıcı adını gir")
+    isim = st.text_input("👤 Adını yaz")
 
-    if st.button("Giriş Yap") and kullanici_adi.strip():
-        st.session_state.kullanici = kullanici_adi
-        st.session_state.messages = gecmisi_yukle(kullanici_adi)
+    if st.button("Giriş Yap") and isim.strip():
+        st.session_state.kullanici = isim
+        st.session_state.messages = gecmisi_yukle(isim)
         st.rerun()
 
     st.stop()
+
+# 👋 GİRİŞ SONRASI MESAJ
+st.success(f"🤍 Hoş geldin dostum, {st.session_state.kullanici}")
 
 # -------------------------------------------------
 # SIDEBAR – PDF
