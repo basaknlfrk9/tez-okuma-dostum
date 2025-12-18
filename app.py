@@ -1,72 +1,79 @@
 import streamlit as st
-from openai import OpenAI
-import PyPDF2
-from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
+from openai import OpenAI
+import PyPDF2
 
-st.set_page_config(page_title="Okuma Dostum", layout="wide")
+# --------------------------------------------------
+# SAYFA AYARI
+# --------------------------------------------------
+st.set_page_config(page_title="📚 Okuma Dostum", layout="wide")
 
-st.write("GSHEETS BAĞLANTI TESTİ")
-conn = st.connection("gsheets", type=GSheetsConnection)
-df = conn.read(ttl=0)
-st.dataframe(df)
+# --------------------------------------------------
+# OPENAI
+# --------------------------------------------------
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Google Sheets bağlantısı
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --------------------------------------------------
+# GSHEETS BAĞLANTISI (4. ADIM BURASI 👇)
+# --------------------------------------------------
+conn = st.connection("gsheets", type="google")
 
+# --------------------------------------------------
+# YARDIMCI FONKSİYONLAR
+# --------------------------------------------------
 def tabloya_yaz(kullanici, tip, mesaj):
-    try:
-        df = conn.read(ttl=0)
-        yeni = pd.DataFrame([{
-            "Zaman": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-            "Kullanici": kullanici,
-            "Tip": tip,
-            "Mesaj": mesaj
-        }])
-        df = pd.concat([df, yeni], ignore_index=True)
-        conn.update(data=df)
-    except Exception as e:
-        st.error(e)
+    df = conn.read(worksheet=0)
+    yeni = pd.DataFrame([{
+        "Zaman": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Kullanici": kullanici,
+        "Tip": tip,
+        "Mesaj": mesaj
+    }])
+    df = pd.concat([df, yeni], ignore_index=True)
+    conn.update(worksheet=0, data=df)
 
 def gecmisi_yukle(kullanici):
-    try:
-        df = conn.read(ttl=0)
-        df = df[df["Kullanici"] == kullanici]
-        df = df[df["Tip"].isin(["USER", "BOT"])]
+    df = conn.read(worksheet=0)
+    df = df[df["Kullanici"] == kullanici]
+    df = df[df["Tip"].isin(["USER", "BOT"])]
 
-        mesajlar = []
-        for _, r in df.iterrows():
-            role = "user" if r["Tip"] == "USER" else "assistant"
-            mesajlar.append({"role": role, "content": r["Mesaj"]})
-        return mesajlar
-    except:
-        return []
+    mesajlar = []
+    for _, r in df.iterrows():
+        role = "user" if r["Tip"] == "USER" else "assistant"
+        mesajlar.append({"role": role, "content": r["Mesaj"]})
+    return mesajlar
 
-# ---------------- GİRİŞ ----------------
+# --------------------------------------------------
+# GİRİŞ EKRANI
+# --------------------------------------------------
 if "user" not in st.session_state:
     st.title("📚 Okuma Dostum")
+
     isim = st.text_input("Adınızı yazın:")
 
     if st.button("Giriş Yap") and isim:
         st.session_state.user = isim
+        st.session_state.start_time = datetime.now()
         st.session_state.messages = gecmisi_yukle(isim)
-        tabloya_yaz(isim, "SİSTEM", "Giriş Yaptı")
+        tabloya_yaz(isim, "SISTEM", "Giriş yaptı")
         st.rerun()
 
-# ---------------- ANA ----------------
+# --------------------------------------------------
+# ANA EKRAN
+# --------------------------------------------------
 else:
-    st.title("📚 Okuma Dostum")
-    st.sidebar.success(f"Hoş geldin {st.session_state.user}")
+    st.sidebar.success(f"👋 Hoş geldin {st.session_state.user}")
 
     if st.sidebar.button("Çıkış Yap"):
-        tabloya_yaz(st.session_state.user, "SİSTEM", "Çıkış Yaptı")
+        sure = (datetime.now() - st.session_state.start_time).seconds // 60
+        tabloya_yaz(st.session_state.user, "SISTEM", f"Çıkış yaptı ({sure} dk)")
         st.session_state.clear()
         st.rerun()
 
-    # PDF
-    st.sidebar.header("📄 PDF Yükleme")
-    file = st.sidebar.file_uploader("PDF Yükle", type="pdf")
+    # PDF YÜKLEME
+    st.sidebar.header("📄 PDF Yükle")
+    file = st.sidebar.file_uploader("PDF seç", type="pdf")
     pdf_text = ""
 
     if file:
@@ -74,18 +81,18 @@ else:
         for p in pdf.pages:
             pdf_text += p.extract_text() or ""
 
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-
+    # GEÇMİŞ SOHBET
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
+    # YENİ SORU
     if soru := st.chat_input("Sorunu yaz"):
         st.session_state.messages.append({"role": "user", "content": soru})
         tabloya_yaz(st.session_state.user, "USER", soru)
 
         with st.chat_message("assistant"):
-            ek = f"PDF:\n{pdf_text[:1500]}\n\n" if pdf_text else ""
+            ek = f"PDF içeriği:\n{pdf_text[:1500]}\n\n" if pdf_text else ""
             yanit = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": ek + soru}]
@@ -93,6 +100,7 @@ else:
             cevap = yanit.choices[0].message.content
             st.write(cevap)
 
-        st.session_state.messages.append({"role": "assistant", "content": cevap})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": cevap}
+        )
         tabloya_yaz(st.session_state.user, "BOT", cevap)
-
