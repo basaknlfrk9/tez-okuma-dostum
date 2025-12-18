@@ -26,22 +26,10 @@ credentials = Credentials.from_service_account_info(
 )
 
 gc = gspread.authorize(credentials)
-ss = gc.open_by_url(st.secrets["GSHEET_URL"])
-sheet = ss.sheet1  # ilk sayfa
-
-# Sidebar’da hangi tabloya bağlıyız, bilgi için:
-st.sidebar.markdown("### 📊 Sheet Bilgisi")
-st.sidebar.write(f"Dosya adı: **{ss.title}**")
-st.sidebar.write(f"Sayfa adı: **{sheet.title}**")
-
-try:
-    mevcut_satirlar = len(sheet.get_all_values())
-    st.sidebar.write(f"Toplam satır (dolu): **{mevcut_satirlar}**")
-except Exception as e:
-    st.sidebar.error(f"Satır sayısı okunamadı: {e}")
+sheet = gc.open_by_url(st.secrets["GSHEET_URL"]).sheet1
 
 
-# ------------------ YARDIMCI FONKSİYONLAR ------------------
+# ------------------ LOG FONKSİYONU ------------------
 def log_yaz(kullanici: str, tip: str, mesaj: str):
     """Kullanıcı hareketlerini Google Sheet'e yazar (Türkiye saatiyle)."""
     try:
@@ -58,6 +46,7 @@ def log_yaz(kullanici: str, tip: str, mesaj: str):
         st.error(f"Google Sheets'e yazarken hata oluştu: {e}")
 
 
+# ------------------ GEÇMİŞ YÜKLE ------------------
 def gecmisi_yukle(kullanici: str):
     """Google Sheet'ten verilen kullanıcıya ait sohbet geçmişini okur."""
     try:
@@ -67,9 +56,7 @@ def gecmisi_yukle(kullanici: str):
 
         df = pd.DataFrame(rows)
 
-        # Başlıklar doğru mu?
         if not {"Kullanici", "Tip", "Mesaj"}.issubset(df.columns):
-            st.warning("Sheet başlıkları 'Zaman, Kullanici, Tip, Mesaj' mı? Kontrol et.")
             return []
 
         df = df[df["Kullanici"] == kullanici]
@@ -80,15 +67,10 @@ def gecmisi_yukle(kullanici: str):
             role = "user" if r["Tip"] == "USER" else "assistant"
             mesajlar.append({"role": role, "content": r["Mesaj"]})
         return mesajlar
+
     except Exception as e:
         st.error(f"Geçmiş okunurken hata: {e}")
         return []
-
-
-# Test butonu: doğru tabloya yazıyor mu diye
-if st.sidebar.button("🧪 Log Test Satırı Yaz"):
-    log_yaz("TEST_KULLANICI", "TEST", "Bu bir deneme satırıdır.")
-    st.sidebar.success("Test satırı yazılmaya çalışıldı. E-tabloda en alta bak.")
 
 
 # ------------------ GİRİŞ EKRANI ------------------
@@ -99,7 +81,6 @@ if "user" not in st.session_state:
     if st.button("Giriş Yap") and isim.strip():
         isim = isim.strip()
         st.session_state.user = isim
-        # girişte geçmişi yükle
         st.session_state.messages = gecmisi_yukle(isim)
         log_yaz(isim, "SİSTEM", "Giriş yaptı")
         st.rerun()
@@ -181,7 +162,6 @@ else:
             "gerektiğinde örnek vererek yap. Akademik terimleri mümkünse daha basit kelimelerle açıkla."
         )
 
-        # model bağlamı için geçmişe ekle
         st.session_state.messages.append({"role": "user", "content": tam_soru})
 
         # -------- OPENAI İSTEK --------
