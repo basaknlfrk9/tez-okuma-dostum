@@ -7,6 +7,11 @@ from datetime import datetime
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
+st.write("GSHEETS BAĞLANTI TESTİ")
+conn = st.connection("gsheets", type=GSheetsConnection)
+df = conn.read(ttl=0)
+st.dataframe(df)
+
 # Google Sheets bağlantısı
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -90,3 +95,4 @@ else:
 
         st.session_state.messages.append({"role": "assistant", "content": cevap})
         tabloya_yaz(st.session_state.user, "BOT", cevap)
+
