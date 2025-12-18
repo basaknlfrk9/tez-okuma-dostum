@@ -1,117 +1,76 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+from datetime import datetime
 from openai import OpenAI
 import PyPDF2
-import pandas as pd
-import os
-import json
-from datetime import datetime
 
-st.set_page_config(page_title="Okuma Dostum", layout="wide")
+st.set_page_config(page_title="Okuma Dostum", page_icon="📚")
 
-excel_file = "kullanicilar.xlsx"
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-
-def kullanici_kaydet(kullanici_adi):
+def kullanici_kaydet(ad):
     try:
-        if not os.path.exists(excel_file):
-            df = pd.DataFrame(columns=["Ad", "Tarih"])
-            df.to_excel(excel_file, index=False)
-        else:
-            df = pd.read_excel(excel_file)
-        yeni = pd.DataFrame(
-            [[kullanici_adi, datetime.now()]],
-            columns=["Ad", "Tarih"]
-        )
-        df = pd.concat([df, yeni], ignore_index=True)
-        df.to_excel(excel_file, index=False)
+        df = conn.read()
     except:
-        pass
+        df = pd.DataFrame(columns=["Kullanici Adi", "Tarih"])
 
+    yeni_satir = pd.DataFrame([{
+        "Kullanici Adi": ad,
+        "Tarih": datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    }])
 
-def gecmis_yukle(kullanici_adi):
-    dosya = f"{kullanici_adi}.json"
-    if os.path.exists(dosya):
-        with open(dosya, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-
-def gecmis_kaydet(kullanici_adi, mesajlar):
-    dosya = f"{kullanici_adi}.json"
-    with open(dosya, "w", encoding="utf-8") as f:
-        json.dump(mesajlar, f, ensure_ascii=False, indent=4)
-
+    df = pd.concat([df, yeni_satir], ignore_index=True)
+    conn.update(data=df)
 
 if "user" not in st.session_state:
-    st.title("Giriş Yap")
-    with st.form("giris"):
-        ad = st.text_input("Adınız:")
-        btn = st.form_submit_button("Giriş")
-    if btn and ad:
-        st.session_state.user = ad
-        kullanici_kaydet(ad)
-        st.rerun()
-else:
-    ad = st.session_state.user
-    st.sidebar.success(f"Kullanıcı: {ad}")
-    st.title(f"📚 {ad} için  Okuma Dostu")
+    st.title("📚 Okuma Dostum'a Hoş Geldiniz")
 
-    if "OPENAI_API_KEY" not in st.secrets:
-        st.error("Şifre Yok!")
-        st.stop()
+    with st.form("giris"):
+        isim = st.text_input("Lütfen adınızı yazın:")
+        giris_btn = st.form_submit_button("Giriş Yap")
+
+        if giris_btn and isim:
+            st.session_state.user = isim
+            kullanici_kaydet(isim)
+            st.rerun()
+
+else:
+    st.title("📚 Okuma Dostum")
+    st.sidebar.success(f"Kullanıcı: {st.session_state.user}")
+
+    if st.sidebar.button("Çıkış Yap"):
+        del st.session_state.user
+        st.rerun()
 
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
     if "messages" not in st.session_state:
-        st.session_state.messages = gecmis_yukle(ad)
-        if not st.session_state.messages:
-            st.session_state.messages = [
-                {"role": "assistant", "content": "Merhaba! PDF yukle veya sohbete basla."}
-            ]
+        st.session_state.messages = []
 
-    with st.sidebar:
-        dosya = st.file_uploader("PDF Yükle", type="pdf")
-        if dosya and "okundu" not in st.session_state:
-            with st.spinner("Okunuyor..."):
-                try:
-                    okuyucu = PyPDF2.PdfReader(dosya)
-                    metin = ""
-                    for sayfa in okuyucu.pages:
-                        metin += sayfa.extract_text()
-                    st.session_state.messages.insert(
-                        0,
-                        {"role": "system", "content": metin}
-                    )
-                    st.session_state.okundu = True
-                    gecmis_kaydet(ad, st.session_state.messages)
-                    st.success("PDF Okundu!")
-                except Exception as e:
-                    st.error(f"Hata: {e}")
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-    for msg in st.session_state.messages:
-        if msg["role"] != "system":
-            st.chat_message(msg["role"]).write(msg["content"])
+    if prompt := st.chat_input("Sorunuzu buraya yazın..."):
+        st.session_state.messages.append({
+            "role": "user",
+            "content": prompt
+        })
 
-    prompt = st.chat_input("Sorunuzu yazın...")
+        with st.chat_message("user"):
+            st.markdown(prompt)
 
-    if prompt:
-        st.chat_message("user").write(prompt)
-        st.session_state.messages.append(
-            {"role": "user", "content": prompt}
-        )
-        gecmis_kaydet(ad, st.session_state.messages)
+        with st.chat_message("assistant"):
+            stream = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=st.session_state.messages,
+                stream=True,
+            )
+            response = st.write_stream(stream)
 
-        yanit = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=st.session_state.messages
-        )
-        cevap = yanit.choices[0].message.content
-
-        st.chat_message("assistant").write(cevap)
-        st.session_state.messages.append(
-            {"role": "assistant", "content": cevap}
-        )
-        gecmis_kaydet(ad, st.session_state.messages)
-
-
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": response
+        })
 
