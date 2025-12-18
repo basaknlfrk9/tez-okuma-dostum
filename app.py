@@ -11,6 +11,23 @@ st.set_page_config(page_title="Okuma Dostum", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def tabloya_yaz(kullanici, mesaj_tipi, icerik):
+    def gecmisi_yukle(kullanici):
+    try:
+        df = conn.read(ttl=0)
+        df = df[df["Kullanici"] == kullanici]
+        df = df[df["Tip"].isin(["USER", "BOT"])]
+
+        mesajlar = []
+        for _, row in df.iterrows():
+            role = "user" if row["Tip"] == "USER" else "assistant"
+            mesajlar.append({
+                "role": role,
+                "content": row["Mesaj"]
+            })
+        return mesajlar
+    except:
+        return []
+
     try:
         df = conn.read(ttl=0)
         yeni = pd.DataFrame([{
@@ -31,7 +48,8 @@ if "user" not in st.session_state:
 
     if st.button("Giriş Yap") and isim:
         st.session_state.user = isim
-        st.session_state.messages = []
+       st.session_state.messages = gecmisi_yukle(isim)
+
         tabloya_yaz(isim, "SİSTEM", "Giriş Yaptı")
         st.rerun()
 
@@ -89,3 +107,4 @@ else:
 
             st.session_state.messages.append({"role": "assistant", "content": cevap})
             tabloya_yaz(st.session_state.user, "BOT", cevap)
+
