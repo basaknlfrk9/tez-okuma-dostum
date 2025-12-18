@@ -1,131 +1,121 @@
 import streamlit as st
-from PyPDF2 import PdfReader
-from gtts import gTTS
-import tempfile
+import openai
+import PyPDF2
+from datetime import datetime
+import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
 
-# ---------------- SAYFA AYARI ----------------
-st.set_page_config(
-    page_title="Okuma Dostum",
-    page_icon="📘",
-    layout="wide"
+# ------------------ AYARLAR ------------------
+st.set_page_config(page_title="Okuma Dostum", layout="wide")
+
+st.title("📚 Okuma Dostum")
+
+# ------------------ OPENAI ------------------
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
+# ------------------ GOOGLE SHEETS ------------------
+scope = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+credentials = Credentials.from_service_account_info(
+    st.secrets["GSHEETS"],
+    scopes=scope
 )
 
-# ---------------- STİL ----------------
-st.markdown("""
-<style>
-body { background-color: #f4f9ff; }
-.big-title { font-size: 42px; font-weight: bold; color: #2c3e50; }
-.card {
-    background-color: #ffffff;
-    padding: 20px;
-    border-radius: 15px;
-    box-shadow: 0px 4px 10px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-}
-</style>
-""", unsafe_allow_html=True)
+gc = gspread.authorize(credentials)
+sheet = gc.open_by_url(
+    st.secrets["GSHEET_URL"]
+).sheet1
 
-# ---------------- SESSION ----------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
 
-# ================== GİRİŞ SAYFASI ==================
-if not st.session_state.logged_in:
-    st.markdown('<div class="big-title">📘 Okuma Dostum</div>', unsafe_allow_html=True)
-    st.write("### Hoş geldin dostum 🌈")
-    st.write("Devam etmek için giriş yap")
+def log_yaz(kullanici, tip, mesaj):
+    sheet.append_row([
+        datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+        kullanici,
+        tip,
+        mesaj
+    ])
 
-    with st.form("login_form"):
-        username = st.text_input("👤 Kullanıcı Adı")
-        password = st.text_input("🔑 Şifre", type="password")
-        login_btn = st.form_submit_button("Giriş Yap")
 
-    if login_btn:
-        if username and password:
-            st.session_state.logged_in = True
-            st.session_state.username = username
-            st.rerun()
-        else:
-            st.error("Lütfen kullanıcı adı ve şifre gir")
+# ------------------ GİRİŞ ------------------
+if "user" not in st.session_state:
+    st.subheader("👋 Hoş geldin Dostum")
+    isim = st.text_input("Adını yaz:")
 
-# ================== ANA UYGULAMA ==================
-else:
-    # --------- YAN PANEL ---------
-    st.sidebar.markdown("## 📂 İçerik Yükleme")
-
-    pdf_file = st.sidebar.file_uploader(
-        "📄 PDF Yükle",
-        type=["pdf"]
-    )
-
-    pasted_text = st.sidebar.text_area(
-        "📝 Metin Yapıştır",
-        height=200,
-        placeholder="Buraya metni yapıştırabilirsin..."
-    )
-
-    # --------- PDF OKUMA ---------
-    text = ""
-    if pdf_file:
-        reader = PdfReader(pdf_file)
-        for page in reader.pages:
-            if page.extract_text():
-                text += page.extract_text() + "\n"
-
-    if pasted_text:
-        text += pasted_text
-
-    # --------- ANA EKRAN ---------
-    st.markdown(f'<div class="big-title">Hoş geldin {st.session_state.username} 🌟</div>', unsafe_allow_html=True)
-    st.write("### Okuma Dostun seninle 📘")
-
-    if not text:
-        st.info("👈 Soldan PDF yükle veya metin yapıştır")
-    else:
-        st.markdown('<div class="card"><b>📖 Metin</b></div>', unsafe_allow_html=True)
-        st.text_area("İçerik", text, height=300)
-
-        # --------- BUTONLAR ---------
-        col1, col2, col3 = st.columns(3)
-
-        with col1:
-            simplify = st.button("🅰️ Basitleştirerek Anlat")
-
-        with col2:
-            bullets = st.button("🅱️ Madde Madde Açıkla")
-
-        with col3:
-            speak = st.button("🔊 Seslendir")
-
-        # --------- BASİTLEŞTİR ---------
-        if simplify:
-            st.markdown('<div class="card">🅰️ Basitleştirilmiş Anlatım</div>', unsafe_allow_html=True)
-            st.write("Bu metnin ana fikri sadeleştirilmiştir:")
-            st.write(text[:500] + "...")
-
-        # --------- MADDE MADDE ---------
-        if bullets:
-            st.markdown('<div class="card">🅱️ Madde Madde Açıklama</div>', unsafe_allow_html=True)
-            for s in text.split(".")[:6]:
-                if s.strip():
-                    st.write("•", s.strip())
-
-        # --------- SESLENDİRME ---------
-        if speak:
-            tts = gTTS(text=text[:1200], lang="tr")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
-                tts.save(fp.name)
-                st.audio(fp.name)
-
-        # --------- SORU SOR ---------
-        st.markdown('<div class="card"><b>❓ Metinle İlgili Soru Sor</b></div>', unsafe_allow_html=True)
-        question = st.text_input("Sorunu yaz")
-
-        if question:
-            st.write("🤖 Bu özellik yakında daha akıllı hale gelecek.")
-            st.write("Sorduğun soru:", question)
-
-    # --------- ÇIKIŞ ---------
-    if st.sidebar.button("🚪 Çıkış Yap"):
-        st.session_state.logged_in = False
+    if st.button("Giriş Yap") and isim:
+        st.session_state.user = isim
+        st.session_state.messages = []
+        log_yaz(isim, "SİSTEM", "Giriş yaptı")
         st.rerun()
+
+# ------------------ ANA EKRAN ------------------
+else:
+    st.sidebar.success(f"Hoş geldin dostum 🌈 {st.session_state.user}")
+
+    if st.sidebar.button("Çıkış Yap"):
+        log_yaz(st.session_state.user, "SİSTEM", "Çıkış yaptı")
+        st.session_state.clear()
+        st.rerun()
+
+    # -------- PDF --------
+    st.sidebar.header("📄 PDF Yükle")
+    pdf_text = ""
+
+    pdf_file = st.sidebar.file_uploader("PDF seç", type="pdf")
+    if pdf_file:
+        reader = PyPDF2.PdfReader(pdf_file)
+        for page in reader.pages:
+            pdf_text += page.extract_text() or ""
+
+    # -------- METİN --------
+    st.sidebar.header("📝 Metin Yapıştır")
+    extra_text = st.sidebar.text_area("Metni buraya yapıştır")
+
+    # -------- MODLAR --------
+    st.sidebar.header("⚙️ Modlar")
+    sade = st.sidebar.checkbox("🅰️ Basitleştirerek anlat")
+    maddeler = st.sidebar.checkbox("🅱️ Madde madde açıkla")
+
+    # -------- CHAT GEÇMİŞİ --------
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.write(m["content"])
+
+    # -------- SORU --------
+    if soru := st.chat_input("Sorunu yaz"):
+        prompt = soru
+
+        if sade:
+            prompt = "Basit ve anlaşılır şekilde anlat: " + prompt
+        if maddeler:
+            prompt = "Madde madde açıkla: " + prompt
+        if pdf_text:
+            prompt = f"PDF içeriği:\n{pdf_text[:2000]}\n\nSoru: {prompt}"
+        if extra_text:
+            prompt = f"Metin:\n{extra_text[:2000]}\n\nSoru: {prompt}"
+
+        st.session_state.messages.append(
+            {"role": "user", "content": prompt}
+        )
+        log_yaz(st.session_state.user, "USER", soru)
+
+        with st.chat_message("assistant"):
+            try:
+                response = openai.ChatCompletion.create(
+                    model="gpt-4o-mini",
+                    messages=st.session_state.messages
+                )
+
+                cevap = response.choices[0].message.content
+                st.write(cevap)
+
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": cevap}
+                )
+                log_yaz(st.session_state.user, "BOT", cevap)
+
+            except Exception as e:
+                st.error(f"Hata: {e}")
