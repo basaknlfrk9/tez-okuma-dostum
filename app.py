@@ -1,6 +1,7 @@
 import streamlit as st
 from PyPDF2 import PdfReader
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import gspread
 from google.oauth2.service_account import Credentials
 from openai import OpenAI
@@ -25,16 +26,29 @@ credentials = Credentials.from_service_account_info(
 )
 
 gc = gspread.authorize(credentials)
-sheet = gc.open_by_url(st.secrets["GSHEET_URL"]).sheet1  # ilk sayfa
+ss = gc.open_by_url(st.secrets["GSHEET_URL"])
+sheet = ss.sheet1  # ilk sayfa
+
+# Sidebar’da hangi tabloya bağlıyız, bilgi için:
+st.sidebar.markdown("### 📊 Sheet Bilgisi")
+st.sidebar.write(f"Dosya adı: **{ss.title}**")
+st.sidebar.write(f"Sayfa adı: **{sheet.title}**")
+
+try:
+    mevcut_satirlar = len(sheet.get_all_values())
+    st.sidebar.write(f"Toplam satır (dolu): **{mevcut_satirlar}**")
+except Exception as e:
+    st.sidebar.error(f"Satır sayısı okunamadı: {e}")
 
 
 # ------------------ YARDIMCI FONKSİYONLAR ------------------
-def log_yaz(kullanici, tip, mesaj):
-    """Kullanıcı hareketlerini Google Sheet'e yazar."""
+def log_yaz(kullanici: str, tip: str, mesaj: str):
+    """Kullanıcı hareketlerini Google Sheet'e yazar (Türkiye saatiyle)."""
     try:
+        now_tr = datetime.now(ZoneInfo("Europe/Istanbul"))
         sheet.append_row(
             [
-                datetime.now().strftime("%d.%m.%Y %H:%M:%S"),
+                now_tr.strftime("%d.%m.%Y %H:%M:%S"),
                 kullanici,
                 tip,
                 mesaj,
@@ -44,7 +58,7 @@ def log_yaz(kullanici, tip, mesaj):
         st.error(f"Google Sheets'e yazarken hata oluştu: {e}")
 
 
-def gecmisi_yukle(kullanici):
+def gecmisi_yukle(kullanici: str):
     """Google Sheet'ten verilen kullanıcıya ait sohbet geçmişini okur."""
     try:
         rows = sheet.get_all_records()
@@ -52,6 +66,12 @@ def gecmisi_yukle(kullanici):
             return []
 
         df = pd.DataFrame(rows)
+
+        # Başlıklar doğru mu?
+        if not {"Kullanici", "Tip", "Mesaj"}.issubset(df.columns):
+            st.warning("Sheet başlıkları 'Zaman, Kullanici, Tip, Mesaj' mı? Kontrol et.")
+            return []
+
         df = df[df["Kullanici"] == kullanici]
         df = df[df["Tip"].isin(["USER", "BOT"])]
 
@@ -61,15 +81,15 @@ def gecmisi_yukle(kullanici):
             mesajlar.append({"role": role, "content": r["Mesaj"]})
         return mesajlar
     except Exception as e:
-        st.error(f"Geçmiş okunurken hata oluştu: {e}")
+        st.error(f"Geçmiş okunurken hata: {e}")
         return []
 
 
-# İsteğe bağlı: solda test butonu
-st.sidebar.button(
-    "🧪 Log Test",
-    on_click=lambda: log_yaz("TEST_KULLANICI", "TEST", "Bu bir deneme satırıdır."),
-)
+# Test butonu: doğru tabloya yazıyor mu diye
+if st.sidebar.button("🧪 Log Test Satırı Yaz"):
+    log_yaz("TEST_KULLANICI", "TEST", "Bu bir deneme satırıdır.")
+    st.sidebar.success("Test satırı yazılmaya çalışıldı. E-tabloda en alta bak.")
+
 
 # ------------------ GİRİŞ EKRANI ------------------
 if "user" not in st.session_state:
@@ -77,9 +97,10 @@ if "user" not in st.session_state:
     isim = st.text_input("Adını yaz:")
 
     if st.button("Giriş Yap") and isim.strip():
-        st.session_state.user = isim.strip()
-        # ÖNEMLİ: GİRİŞTE GEÇMİŞİ YÜKLE
-        st.session_state.messages = gecmisi_yukle(isim.strip())
+        isim = isim.strip()
+        st.session_state.user = isim
+        # girişte geçmişi yükle
+        st.session_state.messages = gecmisi_yukle(isim)
         log_yaz(isim, "SİSTEM", "Giriş yaptı")
         st.rerun()
 
@@ -105,7 +126,7 @@ else:
             if txt:
                 pdf_text += txt + "\n"
 
-    # -------- METİN YAPIŞTIRMA --------
+    # -------- METİN YAPIŞTIR --------
     st.sidebar.header("📝 Metin Yapıştır")
     extra_text = st.sidebar.text_area("Metni buraya yapıştır", height=150)
 
@@ -116,7 +137,6 @@ else:
 
     # -------- SOHBET GEÇMİŞİNİ ÇİZ --------
     if "messages" not in st.session_state:
-        # Eğer login sırasında doldurulmadıysa boş liste
         st.session_state.messages = gecmisi_yukle(st.session_state.user)
 
     for m in st.session_state.messages:
@@ -127,13 +147,13 @@ else:
     soru = st.chat_input("Sorunu yaz")
 
     if soru:
-        # Kullanıcıya gösterilen soru (orijinal)
+        # ekranda göster
         with st.chat_message("user"):
             st.write(soru)
 
         log_yaz(st.session_state.user, "USER", soru)
 
-        # Model için prompt hazırlama
+        # modlara göre kullanıcı isteği
         kullanici_istegi = soru
         if sade:
             kullanici_istegi = (
@@ -143,6 +163,7 @@ else:
         if maddeler:
             kullanici_istegi = "Cevabı madde madde yaz. " + kullanici_istegi
 
+        # PDF + ekstra metni bağlama ekle
         icerik = ""
         if pdf_text:
             icerik += "PDF metni:\n" + pdf_text[:2000] + "\n\n"
@@ -160,7 +181,7 @@ else:
             "gerektiğinde örnek vererek yap. Akademik terimleri mümkünse daha basit kelimelerle açıkla."
         )
 
-        # Geçmişe ekle (model bağlamı için)
+        # model bağlamı için geçmişe ekle
         st.session_state.messages.append({"role": "user", "content": tam_soru})
 
         # -------- OPENAI İSTEK --------
@@ -168,9 +189,11 @@ else:
             try:
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
-                    messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        *st.session_state.messages,
+                    ],
                 )
-
                 cevap = response.choices[0].message.content
                 st.write(cevap)
 
@@ -182,7 +205,7 @@ else:
             except Exception as e:
                 st.error(f"Hata: {e}")
 
-    # -------- İSTEĞE BAĞLI: SON LOG'LARI UYGULAMADA GÖR --------
+    # -------- SON KAYITLARI GÖSTER (İSTEĞE BAĞLI) --------
     st.divider()
     if st.checkbox("📊 Son 10 kaydımı göster"):
         try:
@@ -191,4 +214,4 @@ else:
             df = df[df["Kullanici"] == st.session_state.user]
             st.dataframe(df.tail(10))
         except Exception as e:
-            st.error(f"Loglar okunurken hata oluştu: {e}")
+            st.error(f"Loglar okunurken hata: {e}")
