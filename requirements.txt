@@ -1,9 +1,5 @@
 streamlit
 
-st-gsheets-connection
-
 pandas
 
 openai
-
-PyPDF2
