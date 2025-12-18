@@ -1,5 +1,7 @@
 import streamlit as st
-import pyttsx3
+from gtts import gTTS
+import tempfile
+import os
 
 # -----------------------------
 # SAYFA AYARLARI
@@ -15,27 +17,22 @@ st.set_page_config(
 # -----------------------------
 st.markdown("""
 <style>
-.main {
-    background-color: #F7F9FC;
-}
+.main {background-color: #F7F9FC;}
 .info-box {
     background-color: #E8F0FE;
     padding: 20px;
     border-radius: 16px;
-    margin-bottom: 20px;
     font-size: 18px;
-    color: #2E3440;
 }
 .welcome-box {
     background-color: #DDE7FF;
     padding: 18px;
     border-radius: 14px;
     font-size: 20px;
-    color: #2E3440;
     text-align: center;
 }
 .card {
-    background-color: #FFFFFF;
+    background-color: white;
     padding: 20px;
     border-radius: 16px;
     margin-top: 15px;
@@ -55,29 +52,28 @@ if "giris" not in st.session_state:
 st.title("📘 Okuma Dostum")
 
 # -----------------------------
-# GİRİŞ EKRANI
+# GİRİŞ
 # -----------------------------
 if not st.session_state.giris:
-
     st.markdown("""
     <div class="info-box">
     👋 <b>Okuma Dostum</b> ile metinleri birlikte anlayalım.<br><br>
-    🅰️ Metni basitleştiririm<br>
-    🅱️ Madde madde açıklarım<br>
-    🔊 İstersen seslendiririm<br>
-    🎯 Mini sorularla anladığını kontrol ederiz
+    🅰️ Basitleştirerek anlatır<br>
+    🅱️ Madde madde açıklar<br>
+    🔊 Metni seslendirir<br>
+    🎯 Mini sorularla kontrol eder
     </div>
     """, unsafe_allow_html=True)
 
-    kullanici = st.text_input("Adını yaz dostum 🌱")
+    ad = st.text_input("Adını yaz dostum 🌱")
 
     if st.button("Giriş Yap"):
-        if kullanici.strip() != "":
+        if ad.strip():
             st.session_state.giris = True
-            st.session_state.kullanici = kullanici
+            st.session_state.ad = ad
             st.rerun()
         else:
-            st.warning("Lütfen adını yaz 😊")
+            st.warning("Adını yazmalısın 😊")
 
 # -----------------------------
 # ANA SAYFA
@@ -85,70 +81,63 @@ if not st.session_state.giris:
 else:
     st.markdown(f"""
     <div class="welcome-box">
-    🤍 Hoş geldin dostum, <b>{st.session_state.kullanici}</b><br>
-    Bugün birlikte okumaya hazırız
+    🤍 Hoş geldin dostum, <b>{st.session_state.ad}</b>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown("### 📖 Okumak istediğin metni buraya yapıştır")
+    st.markdown("### 📖 Metni buraya yapıştır")
 
     metin = st.text_area(
         "Metin",
         height=200,
-        placeholder="Buraya metni yapıştırabilirsin..."
+        placeholder="Okumak istediğin metni buraya yazabilirsin..."
     )
 
     col1, col2, col3 = st.columns(3)
 
-    # -----------------------------
-    # 🅰️ BASİTLEŞTİR
-    # -----------------------------
+    # 🅰️ Basitleştir
     with col1:
-        if st.button("🅰️ Basitleştir"):
-            if metin:
-                st.markdown("<div class='card'><b>Basitleştirilmiş Anlatım</b><br><br>"
-                            "Bu metin daha kısa cümlelerle ve kolay kelimelerle anlatılmıştır.<br><br>"
-                            f"{metin[:300]}...</div>", unsafe_allow_html=True)
+        if st.button("🅰️ Basitleştir") and metin:
+            st.markdown(
+                f"<div class='card'><b>Basitleştirilmiş Anlatım</b><br><br>{metin[:250]}...</div>",
+                unsafe_allow_html=True
+            )
 
-    # -----------------------------
-    # 🅱️ MADDE MADDE
-    # -----------------------------
+    # 🅱️ Madde Madde
     with col2:
-        if st.button("🅱️ Madde Madde"):
-            if metin:
-                st.markdown("<div class='card'><b>Madde Madde Açıklama</b><br><br>"
-                            "• Metnin ana konusu nedir?<br>"
-                            "• Kimden veya neden bahsediliyor?<br>"
-                            "• En önemli bilgi hangisi?</div>", unsafe_allow_html=True)
+        if st.button("🅱️ Madde Madde") and metin:
+            st.markdown("""
+            <div class='card'>
+            <b>Madde Madde Açıklama</b><br><br>
+            • Metnin konusu nedir?<br>
+            • En önemli bilgi hangisi?<br>
+            • Kim veya ne anlatılıyor?
+            </div>
+            """, unsafe_allow_html=True)
 
-    # -----------------------------
-    # 🔊 METNİ SESLENDİR
-    # -----------------------------
+    # 🔊 TTS
     with col3:
-        if st.button("🔊 Seslendir"):
-            if metin:
-                engine = pyttsx3.init()
-                engine.say(metin)
-                engine.runAndWait()
-                st.success("Metin seslendirildi 🎧")
+        if st.button("🔊 Seslendir") and metin:
+            tts = gTTS(text=metin, lang="tr")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as fp:
+                tts.save(fp.name)
+                st.audio(fp.name)
 
-    # -----------------------------
-    # 🎯 OKUDUĞUNU ANLAMA ETKİNLİĞİ
-    # -----------------------------
+    # 🎯 Mini Etkinlik
     if metin:
         st.markdown("### 🎯 Mini Okuduğunu Anlama")
 
-        soru = st.radio(
+        cevap = st.radio(
             "Metne göre hangisi doğrudur?",
             [
-                "Metnin ana fikri anlatılmıştır",
-                "Metin tamamen gereksizdir",
-                "Metinde hiçbir bilgi yoktur"
+                "Metnin ana fikri vardır",
+                "Metin anlamsızdır",
+                "Metinde bilgi yoktur"
             ]
         )
 
-        if st.button("Cevabımı Gönder"):
-            if soru == "Metnin ana fikri anlatılmıştır":
-                st.success("🎉 Harika! Doğru cevap")
+        if st.button("Cevabı Gönder"):
+            if cevap == "Metnin ana fikri vardır":
+                st.success("🎉 Harika dostum!")
             else:
-                st.warning("Tekrar düşünelim dostum 💙")
+                st.warning("Bir daha bakalım 💙")
