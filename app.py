@@ -28,7 +28,8 @@ def gecmisi_yukle(kullanici):
     try:
         df = conn.read(ttl=0)
         df = df[df["Kullanici"] == kullanici]
-        df = df[df["Tip"].isin(["USER", "BOT"])]
+        df = df[df["Tip"].str.upper().isin(["USER", "BOT"])]
+
 
         mesajlar = []
         for _, row in df.iterrows():
@@ -98,3 +99,4 @@ else:
 
             st.session_state.messages.append({"role": "assistant", "content": cevap})
             tabloya_yaz(st.session_state.user, "BOT", cevap)
+
