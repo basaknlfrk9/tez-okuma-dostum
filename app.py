@@ -4,6 +4,8 @@ import PyPDF2
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
+st.title("📚 Okuma Dostum")
+
 # ------------------ GİRİŞ KONTROLÜ ------------------
 if "user" not in st.session_state:
     st.title("📚 Okuma Dostum")
