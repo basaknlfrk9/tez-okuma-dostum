@@ -1,5 +1,9 @@
-streamlit 
-openai 
-PyPDF2 
-pandas 
-openpyxl
+streamlit
+
+st-gsheets-connection
+
+pandas
+
+openai
+
+PyPDF2
