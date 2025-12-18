@@ -17,7 +17,8 @@ client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 # --------------------------------------------------
 # GSHEETS BAĞLANTISI (4. ADIM BURASI 👇)
 # --------------------------------------------------
-conn = st.connection("gsheets", type="google")
+conn = st.connection("gsheets", type="gsheets")
+
 
 # --------------------------------------------------
 # YARDIMCI FONKSİYONLAR
@@ -104,3 +105,4 @@ else:
             {"role": "assistant", "content": cevap}
         )
         tabloya_yaz(st.session_state.user, "BOT", cevap)
+
