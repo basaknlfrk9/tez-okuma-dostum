@@ -1,43 +1,46 @@
 import streamlit as st
-import pandas as pd
-from datetime import datetime
 from openai import OpenAI
 import PyPDF2
-import requests
-import io
+import pandas as pd
+from datetime import datetime
+from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(page_title="📚 Okuma Dostum", layout="wide")
 
-SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1GJCUPsYNPhhPasd6me4fUxO8AlSqW7DxWiPsmWKgNUo/export?format=csv"
+# ---------------- GOOGLE SHEETS BAĞLANTISI ----------------
+conn = st.connection("gsheets", type=GSheetsConnection)
 
+# ---------------- KAYIT FONKSİYONU ----------------
 def kaydet(kullanici, tip, mesaj):
     try:
-        df = pd.read_csv(SHEET_CSV_URL)
+        df = conn.read(ttl=0)
     except:
         df = pd.DataFrame(columns=["Zaman", "Kullanici", "Tip", "Mesaj"])
 
-    yeni = {
+    yeni = pd.DataFrame([{
         "Zaman": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Kullanici": kullanici,
         "Tip": tip,
         "Mesaj": mesaj
-    }
+    }])
 
-    df = pd.concat([df, pd.DataFrame([yeni])], ignore_index=True)
+    df = pd.concat([df, yeni], ignore_index=True)
+    conn.update(data=df)
 
-    # CSV'yi tekrar Google Sheets'e yazmak mümkün değil
-    # ama KAYIT GELDİĞİNİ GÖRMEK için bu yeterli
-    df.to_csv("/tmp/log.csv", index=False)
-
+# ---------------- GEÇMİŞ YÜKLE ----------------
 def gecmisi_yukle(kullanici):
     try:
-        df = pd.read_csv(SHEET_CSV_URL)
+        df = conn.read(ttl=0)
         df = df[df["Kullanici"] == kullanici]
-        return [
-            {"role": "user" if r["Tip"] == "USER" else "assistant", "content": r["Mesaj"]}
-            for _, r in df.iterrows()
-            if r["Tip"] in ["USER", "BOT"]
-        ]
+        df = df[df["Tip"].isin(["USER", "BOT"])]
+
+        mesajlar = []
+        for _, r in df.iterrows():
+            mesajlar.append({
+                "role": "user" if r["Tip"] == "USER" else "assistant",
+                "content": r["Mesaj"]
+            })
+        return mesajlar
     except:
         return []
 
@@ -61,6 +64,7 @@ else:
         st.session_state.clear()
         st.rerun()
 
+    # PDF
     st.sidebar.header("📄 PDF Yükle")
     pdf = st.sidebar.file_uploader("PDF seç", type="pdf")
 
@@ -72,10 +76,12 @@ else:
 
     client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
+    # Eski mesajları göster
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
+    # Yeni mesaj
     if soru := st.chat_input("Sorunu yaz"):
         st.session_state.messages.append({"role": "user", "content": soru})
         kaydet(st.session_state.user, "USER", soru)
@@ -83,10 +89,15 @@ else:
         with st.chat_message("assistant"):
             yanit = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": pdf_text[:1500] + "\n\n" + soru}]
+                messages=[{
+                    "role": "user",
+                    "content": pdf_text[:1500] + "\n\n" + soru
+                }]
             )
             cevap = yanit.choices[0].message.content
             st.write(cevap)
 
-        st.session_state.messages.append({"role": "assistant", "content": cevap})
+        st.session_state.messages.append(
+            {"role": "assistant", "content": cevap}
+        )
         kaydet(st.session_state.user, "BOT", cevap)
