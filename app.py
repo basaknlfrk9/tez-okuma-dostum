@@ -11,16 +11,6 @@ st.set_page_config(page_title="Okuma Dostum", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def tabloya_yaz(kullanici, mesaj_tipi, icerik):
-   def gecmisi_yukle(kullanici):
-    try:
-        df = conn.read(ttl=0)
-        df = df[df["Kullanici"] == kullanici]
-        df = df[df["Tip"].isin(["USER", "BOT"])]
-
-        mesajlar = []
-        for _, row in df.iterrows():
-            role = "user" if row["Tip"]
-
     try:
         df = conn.read(ttl=0)
         yeni = pd.DataFrame([{
@@ -34,6 +24,23 @@ def tabloya_yaz(kullanici, mesaj_tipi, icerik):
     except:
         pass
 
+def gecmisi_yukle(kullanici):
+    try:
+        df = conn.read(ttl=0)
+        df = df[df["Kullanici"] == kullanici]
+        df = df[df["Tip"].isin(["USER", "BOT"])]
+
+        mesajlar = []
+        for _, row in df.iterrows():
+            role = "user" if row["Tip"] == "USER" else "assistant"
+            mesajlar.append({
+                "role": role,
+                "content": row["Mesaj"]
+            })
+        return mesajlar
+    except:
+        return []
+
 # ------------------ GİRİŞ ------------------
 if "user" not in st.session_state:
     st.title("📚 Okuma Dostum")
@@ -41,8 +48,7 @@ if "user" not in st.session_state:
 
     if st.button("Giriş Yap") and isim:
         st.session_state.user = isim
-       st.session_state.messages = gecmisi_yukle(isim)
-
+        st.session_state.messages = gecmisi_yukle(isim)
         tabloya_yaz(isim, "SİSTEM", "Giriş Yaptı")
         st.rerun()
 
@@ -56,7 +62,7 @@ else:
         st.session_state.clear()
         st.rerun()
 
-    # -------- PDF YÜKLEME (SIDEBAR) --------
+    # -------- PDF YÜKLEME --------
     st.sidebar.header("📄 PDF Yükleme")
     file = st.sidebar.file_uploader("PDF Yükleyin", type="pdf")
 
@@ -73,21 +79,13 @@ else:
     else:
         client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
-
-        # Eski mesajlar
         for m in st.session_state.messages:
             with st.chat_message(m["role"]):
                 st.write(m["content"])
 
-        # Yeni mesaj
         if soru := st.chat_input("Sorunu buraya yaz..."):
             st.session_state.messages.append({"role": "user", "content": soru})
             tabloya_yaz(st.session_state.user, "USER", soru)
-
-            with st.chat_message("user"):
-                st.write(soru)
 
             with st.chat_message("assistant"):
                 ek = f"PDF İçeriği:\n{pdf_icerik[:1500]}\n\n" if pdf_icerik else ""
@@ -100,5 +98,3 @@ else:
 
             st.session_state.messages.append({"role": "assistant", "content": cevap})
             tabloya_yaz(st.session_state.user, "BOT", cevap)
-
-
