@@ -1,13 +1,14 @@
 import streamlit as st
 from openai import OpenAI
+import PyPDF2
 
-st.set_page_config(page_title="Okuma Dostum", layout="centered")
+st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
 if "user" not in st.session_state:
-    st.title("📚 Okuma Dostum")
+    st.title("Okuma Dostum'a Hoş Geldiniz")
 
-    with st.form("giris"):
-        isim = st.text_input("Adınız:")
+    with st.form("giris_formu"):
+        isim = st.text_input("Adınızı yazın:")
 
         if st.form_submit_button("Giriş Yap") and isim:
             st.session_state.user = isim
