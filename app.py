@@ -4,6 +4,7 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 from openai import OpenAI
+import pandas as pd
 
 # ------------------ SAYFA AYARI ------------------
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
@@ -26,7 +27,8 @@ credentials = Credentials.from_service_account_info(
 gc = gspread.authorize(credentials)
 sheet = gc.open_by_url(st.secrets["GSHEET_URL"]).sheet1  # ilk sayfa
 
-# ------------------ LOG FONKSİYONU ------------------
+
+# ------------------ YARDIMCI FONKSİYONLAR ------------------
 def log_yaz(kullanici, tip, mesaj):
     """Kullanıcı hareketlerini Google Sheet'e yazar."""
     try:
@@ -39,12 +41,33 @@ def log_yaz(kullanici, tip, mesaj):
             ]
         )
     except Exception as e:
-        # Hata varsa ekranda gör
         st.error(f"Google Sheets'e yazarken hata oluştu: {e}")
 
-# Sidebar'da manuel test butonu (şüphe varsa basıp sheet'i kontrol et)
+
+def gecmisi_yukle(kullanici):
+    """Google Sheet'ten verilen kullanıcıya ait sohbet geçmişini okur."""
+    try:
+        rows = sheet.get_all_records()
+        if not rows:
+            return []
+
+        df = pd.DataFrame(rows)
+        df = df[df["Kullanici"] == kullanici]
+        df = df[df["Tip"].isin(["USER", "BOT"])]
+
+        mesajlar = []
+        for _, r in df.iterrows():
+            role = "user" if r["Tip"] == "USER" else "assistant"
+            mesajlar.append({"role": role, "content": r["Mesaj"]})
+        return mesajlar
+    except Exception as e:
+        st.error(f"Geçmiş okunurken hata oluştu: {e}")
+        return []
+
+
+# İsteğe bağlı: solda test butonu
 st.sidebar.button(
-    "🧪 Log Test Satırı Yaz",
+    "🧪 Log Test",
     on_click=lambda: log_yaz("TEST_KULLANICI", "TEST", "Bu bir deneme satırıdır."),
 )
 
@@ -55,7 +78,8 @@ if "user" not in st.session_state:
 
     if st.button("Giriş Yap") and isim.strip():
         st.session_state.user = isim.strip()
-        st.session_state.messages = []  # sohbet geçmişi (oturum içi)
+        # ÖNEMLİ: GİRİŞTE GEÇMİŞİ YÜKLE
+        st.session_state.messages = gecmisi_yukle(isim.strip())
         log_yaz(isim, "SİSTEM", "Giriş yaptı")
         st.rerun()
 
@@ -90,9 +114,10 @@ else:
     sade = st.sidebar.checkbox("🅰️ Basitleştirerek anlat")
     maddeler = st.sidebar.checkbox("🅱️ Madde madde açıkla")
 
-    # -------- SOHBET GEÇMİŞİ ÇİZ --------
+    # -------- SOHBET GEÇMİŞİNİ ÇİZ --------
     if "messages" not in st.session_state:
-        st.session_state.messages = []
+        # Eğer login sırasında doldurulmadıysa boş liste
+        st.session_state.messages = gecmisi_yukle(st.session_state.user)
 
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
@@ -102,7 +127,7 @@ else:
     soru = st.chat_input("Sorunu yaz")
 
     if soru:
-        # Kullanıcıya gösterilen soru
+        # Kullanıcıya gösterilen soru (orijinal)
         with st.chat_message("user"):
             st.write(soru)
 
@@ -135,7 +160,7 @@ else:
             "gerektiğinde örnek vererek yap. Akademik terimleri mümkünse daha basit kelimelerle açıkla."
         )
 
-        # geçmişe ekle
+        # Geçmişe ekle (model bağlamı için)
         st.session_state.messages.append({"role": "user", "content": tam_soru})
 
         # -------- OPENAI İSTEK --------
@@ -156,3 +181,14 @@ else:
 
             except Exception as e:
                 st.error(f"Hata: {e}")
+
+    # -------- İSTEĞE BAĞLI: SON LOG'LARI UYGULAMADA GÖR --------
+    st.divider()
+    if st.checkbox("📊 Son 10 kaydımı göster"):
+        try:
+            rows = sheet.get_all_records()
+            df = pd.DataFrame(rows)
+            df = df[df["Kullanici"] == st.session_state.user]
+            st.dataframe(df.tail(10))
+        except Exception as e:
+            st.error(f"Loglar okunurken hata oluştu: {e}")
