@@ -134,6 +134,9 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
     # Öğrenci analizinde kullanmak için (kelime istatistiği)
     st.session_state.user_texts.append(soru)
 
+    # Son kullanıcı metnini sakla (mikrofon + klavye için ortak)
+    st.session_state.last_user_text = soru
+
     # PDF + ekstra metni bağlama ekle
     icerik = ""
     if pdf_text:
@@ -187,6 +190,7 @@ if "user" not in st.session_state:
         st.session_state.start_time = datetime.now(ZoneInfo("Europe/Istanbul"))
         st.session_state.process_mode = None
         st.session_state.last_audio_len = 0
+        st.session_state.last_user_text = ""
         st.rerun()
 
 # ------------------ ANA EKRAN ------------------
@@ -202,6 +206,8 @@ else:
         st.session_state.process_mode = None
     if "last_audio_len" not in st.session_state:
         st.session_state.last_audio_len = 0
+    if "last_user_text" not in st.session_state:
+        st.session_state.last_user_text = ""
 
     # ======== YAN PANEL ========
     st.sidebar.success(f"Hoş geldin dostum 🌈 {st.session_state.user}")
@@ -232,14 +238,16 @@ else:
     st.sidebar.header("⚙️ Metni işle")
 
     if st.sidebar.button("🅰️ Metni basitleştir"):
-        if not (pdf_text or extra_text):
-            st.sidebar.warning("Önce PDF yükle veya metin yapıştır 😊")
+        # Artık PDF / metin yapıştır YOKSA bile,
+        # son kullanıcı metnini (klavye ya da mikrofon) kullanabiliriz
+        if not (pdf_text or extra_text or st.session_state.last_user_text):
+            st.sidebar.warning("Önce PDF yükle, metin yapıştır veya bir metin söyle 😊")
         else:
             st.session_state.process_mode = "basit"
 
     if st.sidebar.button("🧩 Metni madde madde açıkla"):
-        if not (pdf_text or extra_text):
-            st.sidebar.warning("Önce PDF yükle veya metin yapıştır 😊")
+        if not (pdf_text or extra_text or st.session_state.last_user_text):
+            st.sidebar.warning("Önce PDF yükle, metin yapıştır veya bir metin söyle 😊")
         else:
             st.session_state.process_mode = "madde"
 
@@ -250,43 +258,20 @@ else:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
-    # ------------- 🎤 MİKROFONLA SORU SOR -------------
-    st.markdown("### 🎤 Mikrofonla soru sor")
-    audio_bytes = audio_recorder(
-        text="Kaydı başlat / durdur",
-        pause_threshold=2.0,
-        sample_rate=16000,
-        key="mic_recorder_main",
-    )
-
-    if audio_bytes:
-        # sadece YENİ kayıtları işle
-        last_len = st.session_state.get("last_audio_len", 0)
-        if len(audio_bytes) != last_len:
-            st.session_state["last_audio_len"] = len(audio_bytes)
-
-            st.info(f"Ses kaydı alındı (byte uzunluğu: {len(audio_bytes)})")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-
-            with open(tmp_path, "rb") as f:
-                try:
-                    transcript = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=f,
-                        language="tr",
-                    )
-                    mic_text = transcript.text
-                    st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
-                    # mikrofon sorusu da bir öğrenci sorusu → analiz için ekle
-                    soruyu_isle(mic_text, pdf_text, extra_text)
-                except Exception as e:
-                    st.error(f"Ses yazıya çevrilirken hata: {e}")
-
     # ------------- METNİ İŞLEME ÇIKTISI -------------
-    if st.session_state.get("process_mode") in ("basit", "madde") and (pdf_text or extra_text):
-        kaynak_metin = (pdf_text + "\n" + extra_text).strip()
+    if st.session_state.get("process_mode") in ("basit", "madde") and (
+        pdf_text or extra_text or st.session_state.last_user_text
+    ):
+        # Kaynak metni oluştur: PDF + yapıştırılan metin + son kullanıcı metni
+        parcalar = []
+        if pdf_text:
+            parcalar.append(pdf_text)
+        if extra_text:
+            parcalar.append(extra_text)
+        if st.session_state.last_user_text:
+            parcalar.append(st.session_state.last_user_text)
+
+        kaynak_metin = "\n".join(parcalar).strip()
 
         with st.chat_message("assistant"):
             if st.session_state.process_mode == "basit":
@@ -329,6 +314,40 @@ else:
 
         # işlem bitti, mod bayrağını sıfırla
         st.session_state.process_mode = None
+
+    # ------------- 🎤 MİKROFONLA SORU SOR (ARTIK EN ALTA KOYDUK) -------------
+    st.markdown("### 🎤 Mikrofonla soru sor")
+    audio_bytes = audio_recorder(
+        text="Kaydı başlat / durdur",
+        pause_threshold=2.0,
+        sample_rate=16000,
+        key="mic_recorder_main",
+    )
+
+    if audio_bytes:
+        # sadece YENİ kayıtları işle
+        last_len = st.session_state.get("last_audio_len", 0)
+        if len(audio_bytes) != last_len:
+            st.session_state["last_audio_len"] = len(audio_bytes)
+
+            # Artık byte uzunluğu mesajını göstermiyoruz
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+
+            with open(tmp_path, "rb") as f:
+                try:
+                    transcript = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f,
+                        language="tr",
+                    )
+                    mic_text = transcript.text
+                    st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
+                    # mikrofon sorusu da bir öğrenci sorusu → analiz ve son metin için
+                    soruyu_isle(mic_text, pdf_text, extra_text)
+                except Exception as e:
+                    st.error(f"Ses yazıya çevrilirken hata: {e}")
 
     # ------------- KLAVYEDEN SORU -------------
     soru = st.chat_input("Sorunu yaz")
