@@ -93,7 +93,7 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
     # PDF + ekstra metni bağlama ekle
     icerik = ""
     if pdf_text:
-        icerik += "PDF metni:\n" + pdf_text[:800] + "\n\n"  # biraz kısalttım, istersen 2000 yap
+        icerik += "PDF metni:\n" + pdf_text[:800] + "\n\n"
     if extra_text:
         icerik += "Ek metin:\n" + extra_text[:800] + "\n\n"
 
@@ -168,75 +168,24 @@ else:
     st.sidebar.header("📝 Metin Yapıştır")
     extra_text = st.sidebar.text_area("Metni buraya yapıştır", height=150)
 
-    # Metni işle (YAN PANEL)
+    # ------------- METNİ İŞLE (YAN PANEL) -------------
     st.sidebar.header("⚙️ Metni işle")
+
+    # Bu bayrak, hangi işlemin yapılacağını ana alanda tetiklemek için
+    if "process_mode" not in st.session_state:
+        st.session_state.process_mode = None
 
     if st.sidebar.button("🅰️ Metni basitleştir"):
         if not (pdf_text or extra_text):
             st.sidebar.warning("Önce PDF yükle veya metin yapıştır 😊")
         else:
-            kaynak_metin = (pdf_text + "\n" + extra_text).strip()
-            with st.chat_message("assistant"):
-                st.markdown("### 🅰️ Metnin basitleştirilmiş hali")
-                try:
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "Sen metinleri öğrenciler için sadeleştiren, "
-                                    "özel öğrenme güçlüğüne duyarlı bir okuma yardımcısın."
-                                ),
-                            },
-                            {
-                                "role": "user",
-                                "content": (
-                                    "Aşağıdaki metni 5. sınıf seviyesinde, "
-                                    "kısa ve basit cümlelerle açıkla:\n\n"
-                                    + kaynak_metin
-                                ),
-                            },
-                        ],
-                    )
-                    cevap = response.choices[0].message.content
-                    st.write(cevap)
-                    log_yaz(st.session_state.user, "BOT", "[MOD-BASIT] " + cevap)
-                except Exception as e:
-                    st.error(f"Hata: {e}")
+            st.session_state.process_mode = "basit"
 
     if st.sidebar.button("🧩 Metni madde madde açıkla"):
         if not (pdf_text or extra_text):
             st.sidebar.warning("Önce PDF yükle veya metin yapıştır 😊")
         else:
-            kaynak_metin = (pdf_text + "\n" + extra_text).strip()
-            with st.chat_message("assistant"):
-                st.markdown("### 🧩 Metnin madde madde açıklaması")
-                try:
-                    response = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "Sen metinleri öğrenciler için özetleyen, "
-                                    "özel öğrenme güçlüğüne duyarlı bir okuma yardımcısın."
-                                ),
-                            },
-                            {
-                                "role": "user",
-                                "content": (
-                                    "Aşağıdaki metnin en önemli noktalarını "
-                                    "madde madde çıkar:\n\n" + kaynak_metin
-                                ),
-                            },
-                        ],
-                    )
-                    cevap = response.choices[0].message.content
-                    st.write(cevap)
-                    log_yaz(st.session_state.user, "BOT", "[MOD-MADDE] " + cevap)
-                except Exception as e:
-                    st.error(f"Hata: {e}")
+            st.session_state.process_mode = "madde"
 
     # ======== ORTA ALAN (SOHBET) ========
 
@@ -248,7 +197,7 @@ else:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
-    # 🎤 Mikrofonla soru sor – sohbet alanının hemen üstünde
+    # ------------- 🎤 MİKROFONLA SORU SOR -------------
     st.markdown("### 🎤 Mikrofonla soru sor")
     audio_bytes = audio_recorder(
         text="Kaydı başlat / durdur",
@@ -258,7 +207,7 @@ else:
     )
 
     if audio_bytes:
-        # 👇👇 YENİ EKLEDİĞİMİZ KISIM: sadece yeni kayıt geldiğinde işle
+        # sadece YENİ kayıtları işle
         last_len = st.session_state.get("last_audio_len", 0)
         if len(audio_bytes) != last_len:
             st.session_state["last_audio_len"] = len(audio_bytes)
@@ -277,12 +226,60 @@ else:
                     )
                     mic_text = transcript.text
                     st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
-                    # Mikrofon sorusunu da BAĞIMSIZ bir soru gibi işle
                     soruyu_isle(mic_text, pdf_text, extra_text)
                 except Exception as e:
                     st.error(f"Ses yazıya çevrilirken hata: {e}")
 
-    # Klavyeden soru
+    # ------------- METNİ İŞLEMEYİ GERÇEKTEN YAP (ALTA MESAJ OLARAK) -------------
+    if st.session_state.get("process_mode") in ("basit", "madde") and (pdf_text or extra_text):
+        kaynak_metin = (pdf_text + "\n" + extra_text).strip()
+
+        with st.chat_message("assistant"):
+            if st.session_state.process_mode == "basit":
+                st.markdown("### 🅰️ Metnin basitleştirilmiş hali")
+                system_prompt = (
+                    "Sen metinleri öğrenciler için sadeleştiren, "
+                    "özel öğrenme güçlüğüne duyarlı bir okuma yardımcısın."
+                )
+                user_content = (
+                    "Aşağıdaki metni 5. sınıf seviyesinde, "
+                    "kısa ve basit cümlelerle açıkla:\n\n" + kaynak_metin
+                )
+                log_tag = "[MOD-BASIT]"
+            else:
+                st.markdown("### 🧩 Metnin madde madde açıklaması")
+                system_prompt = (
+                    "Sen metinleri öğrenciler için özetleyen, "
+                    "özel öğrenme güçlüğüne duyarlı bir okuma yardımcısın."
+                )
+                user_content = (
+                    "Aşağıdaki metnin en önemli noktalarını madde madde çıkar:\n\n"
+                    + kaynak_metin
+                )
+                log_tag = "[MOD-MADDE]"
+
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_content},
+                    ],
+                )
+                cevap = response.choices[0].message.content
+                st.write(cevap)
+                # Sohbet geçmişine de ekleyelim
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": cevap}
+                )
+                log_yaz(st.session_state.user, "BOT", f"{log_tag} {cevap}")
+            except Exception as e:
+                st.error(f"Hata: {e}")
+
+        # işlem bitti, mod bayrağını sıfırla
+        st.session_state.process_mode = None
+
+    # ------------- KLAVYEDEN SORU -------------
     soru = st.chat_input("Sorunu yaz")
 
     if soru:
