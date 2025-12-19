@@ -8,13 +8,17 @@ from openai import OpenAI
 import pandas as pd
 import tempfile
 from audio_recorder_streamlit import audio_recorder
+import re
+from collections import Counter
 
 # ------------------ SAYFA AYARI ------------------
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 st.title("📚 Okuma Dostum")
 
+
 # ------------------ OPENAI CLIENT ------------------
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 
 # ------------------ GOOGLE SHEETS BAĞLANTISI ------------------
 scope = [
@@ -31,48 +35,86 @@ gc = gspread.authorize(credentials)
 sheet = gc.open_by_url(st.secrets["GSHEET_URL"]).sheet1
 
 
-# ------------------ LOG FONKSİYONU ------------------
-def log_yaz(kullanici: str, tip: str, mesaj: str):
-    """Kullanıcı hareketlerini Google Sheet'e yazar (Türkiye saatiyle)."""
+# ------------------ KELİME İSTATİSTİĞİ ------------------
+def kelime_istatistikleri(metinler):
+    """
+    Öğrencinin yazdığı/söylediği tüm metinlerden:
+    - en çok kullanılan kelimeyi
+    - ilk 5 sık kelimeyi (kelime (adet) şeklinde)
+    döndürür.
+    """
+    if not metinler:
+        return "", ""
+
+    text = " ".join(metinler).lower()
+    # harf/rakam dizilerini kelime kabul et
+    tokens = re.findall(r"\w+", text, flags=re.UNICODE)
+
+    # çok sık ve anlamsız kelimeleri at (Türkçe basit stopword listesi)
+    stop = {
+        "ve", "veya", "ile", "ama", "fakat", "çünkü",
+        "ben", "sen", "o", "biz", "siz", "onlar",
+        "bu", "şu", "o", "bir", "iki", "üç",
+        "mi", "mı", "mu", "mü",
+        "de", "da", "ki",
+        "için", "gibi", "çok", "az",
+        "ne", "neden", "nasıl", "hangi",
+    }
+
+    words = [t for t in tokens if len(t) > 2 and t not in stop]
+
+    if not words:
+        return "", ""
+
+    counts = Counter(words)
+    en_cok_kelime, _ = counts.most_common(1)[0]
+    top5 = counts.most_common(5)
+    diger = ", ".join([f"{w} ({c})" for w, c in top5])
+
+    return en_cok_kelime, diger
+
+
+# ------------------ OTURUM ÖZETİ YAZ ------------------
+def oturum_ozeti_yaz():
+    """
+    Çıkışta:
+    - giriş saati
+    - çıkış saati
+    - kaç dakika kalmış
+    - en çok kullandığı kelime
+    - en sık geçen 5 kelime
+    bilgilerini tek satır olarak Google Sheet'e yazar.
+    BOT cevabı hiç kaydedilmez.
+    """
+    if "user" not in st.session_state:
+        return
+    if "start_time" not in st.session_state:
+        return
+
+    now_tr = datetime.now(ZoneInfo("Europe/Istanbul"))
+    start = st.session_state.start_time
+
+    dakika = round((now_tr - start).total_seconds() / 60, 1)
+    giris_str = start.strftime("%d.%m.%Y %H:%M:%S")
+    cikis_str = now_tr.strftime("%d.%m.%Y %H:%M:%S")
+
+    user_texts = st.session_state.get("user_texts", [])
+    en_cok, diger = kelime_istatistikleri(user_texts)
+
     try:
-        now_tr = datetime.now(ZoneInfo("Europe/Istanbul"))
+        # Sütun sırası: Kullanici | Giris | Cikis | Dakika | EnCokKelime | SikKelimeler
         sheet.append_row(
             [
-                now_tr.strftime("%d.%m.%Y %H:%M:%S"),
-                kullanici,
-                tip,
-                mesaj,
+                st.session_state.user,
+                giris_str,
+                cikis_str,
+                dakika,
+                en_cok,
+                diger,
             ]
         )
     except Exception as e:
-        st.error(f"Google Sheets'e yazarken hata oluştu: {e}")
-
-
-# ------------------ GEÇMİŞ YÜKLE ------------------
-def gecmisi_yukle(kullanici: str):
-    """Google Sheet'ten verilen kullanıcıya ait sohbet geçmişini okur."""
-    try:
-        rows = sheet.get_all_records()
-        if not rows:
-            return []
-
-        df = pd.DataFrame(rows)
-
-        if not {"Kullanici", "Tip", "Mesaj"}.issubset(df.columns):
-            return []
-
-        df = df[df["Kullanici"] == kullanici]
-        df = df[df["Tip"].isin(["USER", "BOT"])]
-
-        mesajlar = []
-        for _, r in df.iterrows():
-            role = "user" if r["Tip"] == "USER" else "assistant"
-            mesajlar.append({"role": role, "content": r["Mesaj"]})
-        return mesajlar
-
-    except Exception as e:
-        st.error(f"Geçmiş okunurken hata: {e}")
-        return []
+        st.error(f"Oturum özeti yazılırken hata: {e}")
 
 
 # ------------------ SORU CEVAPLAMA (HER SORU BAĞIMSIZ) ------------------
@@ -82,13 +124,15 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
     Model her seferinde sadece BU soruyu görür; önceki sohbeti bağlama göndermez.
     """
 
-    # Sohbette kullanıcı balonu
+    # Sohbet alanında kullanıcı balonu
     with st.chat_message("user"):
         st.write(soru)
 
-    # Ekranda geçmişte görünebilmesi için kaydet
+    # Ekranda gösterilecek geçmiş için
     st.session_state.messages.append({"role": "user", "content": soru})
-    log_yaz(st.session_state.user, "USER", soru)
+
+    # Öğrenci analizinde kullanmak için (kelime istatistiği)
+    st.session_state.user_texts.append(soru)
 
     # PDF + ekstra metni bağlama ekle
     icerik = ""
@@ -121,10 +165,10 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
             cevap = response.choices[0].message.content
             st.write(cevap)
 
+            # Ekranda geçmiş için (ama SHEET'e yazmıyoruz)
             st.session_state.messages.append(
                 {"role": "assistant", "content": cevap}
             )
-            log_yaz(st.session_state.user, "BOT", cevap)
 
         except Exception as e:
             st.error(f"Hata: {e}")
@@ -138,8 +182,9 @@ if "user" not in st.session_state:
     if st.button("Giriş Yap") and isim.strip():
         isim = isim.strip()
         st.session_state.user = isim
-        st.session_state.messages = gecmisi_yukle(isim)
-        log_yaz(isim, "SİSTEM", "Giriş yaptı")
+        st.session_state.messages = []      # sadece ekranda göstermek için
+        st.session_state.user_texts = []    # analiz için öğrenci soruları
+        st.session_state.start_time = datetime.now(ZoneInfo("Europe/Istanbul"))
         st.rerun()
 
 # ------------------ ANA EKRAN ------------------
@@ -148,7 +193,8 @@ else:
     st.sidebar.success(f"Hoş geldin dostum 🌈 {st.session_state.user}")
 
     if st.sidebar.button("Çıkış Yap"):
-        log_yaz(st.session_state.user, "SİSTEM", "Çıkış yaptı")
+        # Burada sadece ÖZET satırı yazıyoruz
+        oturum_ozeti_yaz()
         st.session_state.clear()
         st.rerun()
 
@@ -171,7 +217,6 @@ else:
     # ------------- METNİ İŞLE (YAN PANEL) -------------
     st.sidebar.header("⚙️ Metni işle")
 
-    # Bu bayrak, hangi işlemin yapılacağını ana alanda tetiklemek için
     if "process_mode" not in st.session_state:
         st.session_state.process_mode = None
 
@@ -189,9 +234,9 @@ else:
 
     # ======== ORTA ALAN (SOHBET) ========
 
-    # Geçmişi çiz
+    # Eski mesajları göster (sadece bu oturum)
     if "messages" not in st.session_state:
-        st.session_state.messages = gecmisi_yukle(st.session_state.user)
+        st.session_state.messages = []
 
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
@@ -226,11 +271,12 @@ else:
                     )
                     mic_text = transcript.text
                     st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
+                    # mikrofon sorusu da bir öğrenci sorusu → analiz için ekle
                     soruyu_isle(mic_text, pdf_text, extra_text)
                 except Exception as e:
                     st.error(f"Ses yazıya çevrilirken hata: {e}")
 
-    # ------------- METNİ İŞLEMEYİ GERÇEKTEN YAP (ALTA MESAJ OLARAK) -------------
+    # ------------- METNİ İŞLEME ÇIKTISI -------------
     if st.session_state.get("process_mode") in ("basit", "madde") and (pdf_text or extra_text):
         kaynak_metin = (pdf_text + "\n" + extra_text).strip()
 
@@ -245,7 +291,6 @@ else:
                     "Aşağıdaki metni 5. sınıf seviyesinde, "
                     "kısa ve basit cümlelerle açıkla:\n\n" + kaynak_metin
                 )
-                log_tag = "[MOD-BASIT]"
             else:
                 st.markdown("### 🧩 Metnin madde madde açıklaması")
                 system_prompt = (
@@ -256,7 +301,6 @@ else:
                     "Aşağıdaki metnin en önemli noktalarını madde madde çıkar:\n\n"
                     + kaynak_metin
                 )
-                log_tag = "[MOD-MADDE]"
 
             try:
                 response = client.chat.completions.create(
@@ -268,19 +312,9 @@ else:
                 )
                 cevap = response.choices[0].message.content
                 st.write(cevap)
-                # Sohbet geçmişine de ekleyelim
+                # Bu cevaplar da sadece ekranda dursun, sheet'e yazmıyoruz
                 st.session_state.messages.append(
                     {"role": "assistant", "content": cevap}
                 )
-                log_yaz(st.session_state.user, "BOT", f"{log_tag} {cevap}")
             except Exception as e:
-                st.error(f"Hata: {e}")
-
-        # işlem bitti, mod bayrağını sıfırla
-        st.session_state.process_mode = None
-
-    # ------------- KLAVYEDEN SORU -------------
-    soru = st.chat_input("Sorunu yaz")
-
-    if soru:
-        soruyu_isle(soru, pdf_text, extra_text)
+                st.error(f"Hata: {e
