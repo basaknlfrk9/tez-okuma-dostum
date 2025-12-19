@@ -5,4 +5,4 @@ google-auth
 pandas
 PyPDF2
 gtts
-
+audio-recorder-streamlit
