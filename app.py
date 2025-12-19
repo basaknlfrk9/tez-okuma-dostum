@@ -75,14 +75,19 @@ def gecmisi_yukle(kullanici: str):
         return []
 
 
-# ------------------ SORU CEVAPLAMA FONKSİYONU ------------------
+# ------------------ SORU CEVAPLAMA (HER SORU BAĞIMSIZ) ------------------
 def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
-    """PDF/metin + soruyu kullanarak cevap üretir, sohbet alanına ve loga yazar."""
+    """
+    PDF/metin + soruyu kullanarak cevap üretir.
+    Model her seferinde sadece BU soruyu görür; önceki sohbeti bağlama göndermez.
+    """
 
     # Sohbette kullanıcı balonu
     with st.chat_message("user"):
         st.write(soru)
 
+    # Ekranda geçmişte görünebilmesi için kaydet
+    st.session_state.messages.append({"role": "user", "content": soru})
     log_yaz(st.session_state.user, "USER", soru)
 
     # PDF + ekstra metni bağlama ekle
@@ -103,17 +108,14 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
         "gerektiğinde örnek vererek yap. Akademik terimleri mümkünse daha basit kelimelerle açıkla."
     )
 
-    # Geçmişe ekle (model bağlamı için)
-    st.session_state.messages.append({"role": "user", "content": tam_soru})
-
-    # OpenAI isteği
+    # MODEL ARTIK SADECE BU SORUYU GÖRÜYOR
     with st.chat_message("assistant"):
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    *st.session_state.messages,
+                    {"role": "user", "content": tam_soru},
                 ],
             )
             cevap = response.choices[0].message.content
@@ -246,7 +248,7 @@ else:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
-    # 🎤 Mikrofonla soru sor – sohbet alanının HEMEN ÜSTÜNDE
+    # 🎤 Mikrofonla soru sor – sohbet alanının hemen üstünde
     st.markdown("### 🎤 Mikrofonla soru sor")
     audio_bytes = audio_recorder(
         text="Kaydı başlat / durdur",
@@ -270,6 +272,7 @@ else:
                 )
                 mic_text = transcript.text
                 st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
+                # Mikrofon sorusunu da BAĞIMSIZ bir soru gibi işle
                 soruyu_isle(mic_text, pdf_text, extra_text)
             except Exception as e:
                 st.error(f"Ses yazıya çevrilirken hata: {e}")
