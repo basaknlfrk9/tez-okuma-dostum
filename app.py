@@ -3,6 +3,7 @@ from PyPDF2 import PdfReader
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import gspread
+from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 from openai import OpenAI
 import tempfile
@@ -29,7 +30,17 @@ credentials = Credentials.from_service_account_info(
 )
 
 gc = gspread.authorize(credentials)
-sheet = gc.open_by_url(st.secrets["GSHEET_URL"]).sheet1
+workbook = gc.open_by_url(st.secrets["GSHEET_URL"])
+
+# Özet tablosu: birinci sayfa (Sheet1)
+stats_sheet = workbook.sheet1
+
+# Sohbet tablosu: "Sohbet" isminde bir sayfa (yoksa otomatik oluştur)
+try:
+    chat_sheet = workbook.worksheet("Sohbet")
+except WorksheetNotFound:
+    chat_sheet = workbook.add_worksheet(title="Sohbet", rows=1000, cols=4)
+    chat_sheet.append_row(["Kullanici", "Zaman", "Rol", "Mesaj"])
 
 
 # ------------------ KELİME İSTATİSTİĞİ ------------------
@@ -64,12 +75,44 @@ def kelime_istatistikleri(metinler):
     return en_cok_kelime, diger
 
 
+# ------------------ SOHBETİ SHEET'E YAZ / YÜKLE ------------------
+def log_message(user, role, content):
+    """
+    Her mesajı 'Sohbet' sayfasına yazar:
+    Kullanici | Zaman | Rol | Mesaj
+    """
+    try:
+        now_tr = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
+        chat_sheet.append_row([user, now_tr, role, content])
+    except Exception as e:
+        st.error(f"Sohbet kaydedilirken hata: {e}")
+
+
+def load_history(user):
+    """
+    Girişte, aynı isimli kullanıcının tüm eski sohbetini 'Sohbet' sayfasından okur.
+    """
+    messages = []
+    try:
+        rows = chat_sheet.get_all_records()
+        for r in rows:
+            if r.get("Kullanici") == user:
+                rol_raw = str(r.get("Rol", "")).lower()
+                role = "user" if rol_raw == "user" else "assistant"
+                content = r.get("Mesaj", "")
+                if content:
+                    messages.append({"role": role, "content": content})
+    except Exception as e:
+        st.error(f"Sohbet geçmişi yüklenemedi: {e}")
+    return messages
+
+
 # ------------------ OTURUM ÖZETİ YAZ ------------------
 def oturum_ozeti_yaz():
     """
     Çıkışta:
     Kullanici | Giris | Cikis | Dakika | EnCokKelime | SikKelimeler
-    şeklinde TEK SATIR olarak Google Sheet'e yazar.
+    şeklinde TEK SATIR olarak özet tabloya yazar.
     """
     if "user" not in st.session_state:
         return
@@ -87,7 +130,7 @@ def oturum_ozeti_yaz():
     en_cok, diger = kelime_istatistikleri(user_texts)
 
     try:
-        sheet.append_row(
+        stats_sheet.append_row(
             [
                 st.session_state.user,
                 giris_str,
@@ -118,6 +161,10 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
     st.session_state.user_texts.append(soru)
     # Metni işleme butonları için
     st.session_state.last_user_text = soru
+
+    # Sheet'e kaydet (kullanıcı mesajı)
+    if "user" in st.session_state:
+        log_message(st.session_state.user, "user", soru)
 
     # Bağlam oluştur
     icerik = ""
@@ -151,6 +198,11 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
             st.session_state.messages.append(
                 {"role": "assistant", "content": cevap}
             )
+
+            # Sheet'e kaydet (bot cevabı)
+            if "user" in st.session_state:
+                log_message(st.session_state.user, "assistant", cevap)
+
         except Exception as e:
             st.error(f"Hata: {e}")
 
@@ -163,7 +215,11 @@ if "user" not in st.session_state:
     if st.button("Giriş Yap") and isim.strip():
         isim = isim.strip()
         st.session_state.user = isim
-        st.session_state.messages = []
+
+        # 📥 Eski sohbeti Google Sheet'ten yükle
+        st.session_state.messages = load_history(isim)
+
+        # Yeni oturum için istatistik alanları
         st.session_state.user_texts = []
         st.session_state.start_time = datetime.now(ZoneInfo("Europe/Istanbul"))
         st.session_state.process_mode = None
@@ -173,7 +229,7 @@ if "user" not in st.session_state:
 
 # ------------------ ANA EKRAN ------------------
 else:
-    # Eksik state'leri tamamla (eski oturumdan dönülürse)
+    # Eksik state'leri tamamla
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "user_texts" not in st.session_state:
