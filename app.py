@@ -34,6 +34,7 @@ sheet = gc.open_by_url(st.secrets["GSHEET_URL"]).sheet1
 
 # ------------------ KELİME İSTATİSTİĞİ ------------------
 def kelime_istatistikleri(metinler):
+    """Öğrencinin tüm sorularından kelime istatistiği çıkarır."""
     if not metinler:
         return "", ""
 
@@ -65,6 +66,11 @@ def kelime_istatistikleri(metinler):
 
 # ------------------ OTURUM ÖZETİ YAZ ------------------
 def oturum_ozeti_yaz():
+    """
+    Çıkışta:
+    Kullanici | Giris | Cikis | Dakika | EnCokKelime | SikKelimeler
+    şeklinde TEK SATIR olarak Google Sheet'e yazar.
+    """
     if "user" not in st.session_state:
         return
     if "start_time" not in st.session_state:
@@ -81,7 +87,6 @@ def oturum_ozeti_yaz():
     en_cok, diger = kelime_istatistikleri(user_texts)
 
     try:
-        # Sütun sırası: Kullanici | Giris | Cikis | Dakika | EnCokKelime | SikKelimeler
         sheet.append_row(
             [
                 st.session_state.user,
@@ -98,14 +103,23 @@ def oturum_ozeti_yaz():
 
 # ------------------ SORU CEVAPLAMA ------------------
 def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
+    """
+    PDF/metin + soruyu kullanarak cevap üretir.
+    Önceki sohbeti bağlama göndermez; her soru bağımsızdır.
+    """
+
     # Kullanıcı balonu
     with st.chat_message("user"):
         st.write(soru)
 
+    # Ekranda geçmiş için
     st.session_state.messages.append({"role": "user", "content": soru})
+    # İstatistik için
     st.session_state.user_texts.append(soru)
-    st.session_state.last_user_text = soru  # metni işleme modları için
+    # Metni işleme butonları için
+    st.session_state.last_user_text = soru
 
+    # Bağlam oluştur
     icerik = ""
     if pdf_text:
         icerik += "PDF metni:\n" + pdf_text[:800] + "\n\n"
@@ -159,7 +173,7 @@ if "user" not in st.session_state:
 
 # ------------------ ANA EKRAN ------------------
 else:
-    # Eksik state'leri tamamla
+    # Eksik state'leri tamamla (eski oturumdan dönülürse)
     if "messages" not in st.session_state:
         st.session_state.messages = []
     if "user_texts" not in st.session_state:
@@ -211,49 +225,49 @@ else:
         else:
             st.session_state.process_mode = "madde"
 
-   # 🎤 MİKROFON – SABİT VE TAM ÇALIŞAN VERSİYON
-st.sidebar.header("🎤 Mikrofonla soru sor")
+    # 🎤 MİKROFON – YAN PANELDE SABİT VE SAĞLAM
+    st.sidebar.header("🎤 Mikrofonla soru sor")
 
-with st.sidebar.container(border=True):
-    st.markdown("**🔴 Mikrofon (ses al/durdur)**")
+    with st.sidebar.container(border=True):
+        st.markdown("**🔴 Mikrofon (ses al/durdur)**")
 
-    audio_bytes = audio_recorder(
-        text="Konuşmak için tıkla",
-        pause_threshold=1.8,
-        sample_rate=16000,
-        key="mic_box",
-    )
+        audio_bytes = audio_recorder(
+            text="Konuşmak için tıkla",
+            pause_threshold=1.8,
+            sample_rate=16000,
+            key="mic_box",
+        )
 
-    # Mikrofonun hiç tıklanamama sorununu önlemek için:
-    st.sidebar.markdown(
-        "<small style='opacity:0.6'>🎙️ Mikrofon sabit modda çalışıyor.</small>",
-        unsafe_allow_html=True,
-    )
+        st.markdown(
+            "<small style='opacity:0.6'>🎙️ Mikrofon sabit modda çalışıyor.</small>",
+            unsafe_allow_html=True,
+        )
 
-    if audio_bytes:
-        st.session_state["last_audio_len"] = len(audio_bytes)
+        if audio_bytes:
+            # Yeni kayıt mı kontrol et
+            last_len = st.session_state.get("last_audio_len", 0)
+            if len(audio_bytes) != last_len:
+                st.session_state["last_audio_len"] = len(audio_bytes)
+                st.sidebar.success("Ses alındı ✔️ Yazıya çevriliyor...")
 
-        # Kullanıcıya geri bildirim
-        st.sidebar.success("Ses alındı ✔️ Yazıya çevriliyor...")
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                    tmp.write(audio_bytes)
+                    tmp_path = tmp.name
 
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
+                try:
+                    with open(tmp_path, "rb") as f:
+                        transcript = client.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=f,
+                            language="tr",
+                        )
+                        mic_text = transcript.text
 
-        try:
-            with open(tmp_path, "rb") as f:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=f,
-                    language="tr",
-                )
-                mic_text = transcript.text
+                    st.sidebar.info(f"📝 Sesli soru: **{mic_text}**")
+                    soruyu_isle(mic_text, pdf_text, extra_text)
 
-            st.sidebar.info(f"📝 Sesli soru: **{mic_text}**")
-            soruyu_isle(mic_text, pdf_text, extra_text)
-
-        except Exception as e:
-            st.sidebar.error(f"Ses yazıya çevrilirken hata oluştu: {e}")
+                except Exception as e:
+                    st.sidebar.error(f"Ses yazıya çevrilirken hata oluştu: {e}")
 
     # ========= ORTA ALAN (SOHBET) =========
 
@@ -262,7 +276,7 @@ with st.sidebar.container(border=True):
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
-    # Metni işleme çıktısı
+    # Metni işleme çıktısı (butonlardan)
     if st.session_state.get("process_mode") in ("basit", "madde") and (
         pdf_text or extra_text or st.session_state.last_user_text
     ):
@@ -320,4 +334,3 @@ with st.sidebar.container(border=True):
     soru = st.chat_input("Sorunu yaz")
     if soru:
         soruyu_isle(soru, pdf_text, extra_text)
-
