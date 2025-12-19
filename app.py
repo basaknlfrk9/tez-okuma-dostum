@@ -93,9 +93,9 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
     # PDF + ekstra metni bağlama ekle
     icerik = ""
     if pdf_text:
-        icerik += "PDF metni:\n" + pdf_text[:2000] + "\n\n"
+        icerik += "PDF metni:\n" + pdf_text[:800] + "\n\n"  # biraz kısalttım, istersen 2000 yap
     if extra_text:
-        icerik += "Ek metin:\n" + extra_text[:2000] + "\n\n"
+        icerik += "Ek metin:\n" + extra_text[:800] + "\n\n"
 
     if icerik:
         tam_soru = icerik + "Öğrencinin sorusu:\n" + soru
@@ -258,24 +258,29 @@ else:
     )
 
     if audio_bytes:
-        st.info(f"Ses kaydı alındı (byte uzunluğu: {len(audio_bytes)})")
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-            tmp.write(audio_bytes)
-            tmp_path = tmp.name
+        # 👇👇 YENİ EKLEDİĞİMİZ KISIM: sadece yeni kayıt geldiğinde işle
+        last_len = st.session_state.get("last_audio_len", 0)
+        if len(audio_bytes) != last_len:
+            st.session_state["last_audio_len"] = len(audio_bytes)
 
-        with open(tmp_path, "rb") as f:
-            try:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=f,
-                    language="tr",
-                )
-                mic_text = transcript.text
-                st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
-                # Mikrofon sorusunu da BAĞIMSIZ bir soru gibi işle
-                soruyu_isle(mic_text, pdf_text, extra_text)
-            except Exception as e:
-                st.error(f"Ses yazıya çevrilirken hata: {e}")
+            st.info(f"Ses kaydı alındı (byte uzunluğu: {len(audio_bytes)})")
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+
+            with open(tmp_path, "rb") as f:
+                try:
+                    transcript = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f,
+                        language="tr",
+                    )
+                    mic_text = transcript.text
+                    st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
+                    # Mikrofon sorusunu da BAĞIMSIZ bir soru gibi işle
+                    soruyu_isle(mic_text, pdf_text, extra_text)
+                except Exception as e:
+                    st.error(f"Ses yazıya çevrilirken hata: {e}")
 
     # Klavyeden soru
     soru = st.chat_input("Sorunu yaz")
