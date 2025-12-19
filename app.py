@@ -31,6 +31,7 @@ credentials = Credentials.from_service_account_info(
 gc = gspread.authorize(credentials)
 sheet = gc.open_by_url(st.secrets["GSHEET_URL"]).sheet1
 
+
 # ------------------ KELİME İSTATİSTİĞİ ------------------
 def kelime_istatistikleri(metinler):
     if not metinler:
@@ -60,6 +61,7 @@ def kelime_istatistikleri(metinler):
     diger = ", ".join([f"{w} ({c})" for w, c in top5])
 
     return en_cok_kelime, diger
+
 
 # ------------------ OTURUM ÖZETİ YAZ ------------------
 def oturum_ozeti_yaz():
@@ -92,6 +94,7 @@ def oturum_ozeti_yaz():
         )
     except Exception as e:
         st.error(f"Oturum özeti yazılırken hata: {e}")
+
 
 # ------------------ SORU CEVAPLAMA ------------------
 def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
@@ -136,6 +139,7 @@ def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
             )
         except Exception as e:
             st.error(f"Hata: {e}")
+
 
 # ------------------ GİRİŞ EKRANI ------------------
 if "user" not in st.session_state:
@@ -207,6 +211,37 @@ else:
         else:
             st.session_state.process_mode = "madde"
 
+    # 🎤 MİKROFON – YAN PANELDE SABİT
+    st.sidebar.header("🎤 Mikrofonla soru sor")
+    audio_bytes = audio_recorder(
+        text="Kaydı başlat / durdur",
+        pause_threshold=2.0,
+        sample_rate=16000,
+        key="mic_sidebar",
+    )
+
+    if audio_bytes:
+        last_len = st.session_state.get("last_audio_len", 0)
+        if len(audio_bytes) != last_len:
+            st.session_state["last_audio_len"] = len(audio_bytes)
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+
+            with open(tmp_path, "rb") as f:
+                try:
+                    transcript = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f,
+                        language="tr",
+                    )
+                    mic_text = transcript.text
+                    st.sidebar.markdown(f"🎧 Anlaşılan soru/metin:\n\n> _{mic_text}_")
+                    soruyu_isle(mic_text, pdf_text, extra_text)
+                except Exception as e:
+                    st.sidebar.error(f"Ses yazıya çevrilirken hata: {e}")
+
     # ========= ORTA ALAN (SOHBET) =========
 
     # Geçmiş mesajları göster
@@ -272,34 +307,3 @@ else:
     soru = st.chat_input("Sorunu yaz")
     if soru:
         soruyu_isle(soru, pdf_text, extra_text)
-
-    # 🎤 MİKROFON – HER ZAMAN EN ALTA SABİT
-    st.markdown("### 🎤 Mikrofonla soru sor")
-    audio_bytes = audio_recorder(
-        text="Kaydı başlat / durdur",
-        pause_threshold=2.0,
-        sample_rate=16000,
-        key="mic_main",
-    )
-
-    if audio_bytes:
-        last_len = st.session_state.get("last_audio_len", 0)
-        if len(audio_bytes) != last_len:
-            st.session_state["last_audio_len"] = len(audio_bytes)
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-
-            with open(tmp_path, "rb") as f:
-                try:
-                    transcript = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=f,
-                        language="tr",
-                    )
-                    mic_text = transcript.text
-                    st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
-                    soruyu_isle(mic_text, pdf_text, extra_text)
-                except Exception as e:
-                    st.error(f"Ses yazıya çevrilirken hata: {e}")
