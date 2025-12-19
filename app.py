@@ -166,35 +166,38 @@ else:
     st.sidebar.header("📝 Metin Yapıştır")
     extra_text = st.sidebar.text_area("Metni buraya yapıştır", height=150)
 
-    # -------- 🎤 MİKROFONLA SORU SOR (YAN PANEL) --------
-    st.sidebar.header("🎤 Mikrofonla soru sor")
-    audio_bytes = audio_recorder(
-        text="Kaydı başlat / durdur",
-        pause_threshold=2.0,
-        sample_rate=16000,
-        key="mic_recorder_sidebar",
-    )
+   # -------- 🎤 MİKROFONLA SORU SOR (YAN PANEL) --------
+st.sidebar.header("🎤 Mikrofonla soru sor")
 
-    if audio_bytes:
-        last_len = st.session_state.get("last_audio_len", 0)
-        if len(audio_bytes) != last_len:
-            st.session_state["last_audio_len"] = len(audio_bytes)
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
+audio_bytes = audio_recorder(
+    text="Kaydı başlat / durdur",
+    pause_threshold=2.0,
+    sample_rate=16000,
+    key="mic_recorder_sidebar",
+)
 
-            with open(tmp_path, "rb") as f:
-                try:
-                    transcript = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=f,
-                        language="tr",
-                    )
-                    mic_text = transcript.text
-                    st.sidebar.info(f"Anlaşılan soru: {mic_text}")
-                    soruyu_isle(mic_text, pdf_text, extra_text)
-                except Exception as e:
-                    st.sidebar.error(f"Ses yazıya çevrilirken hata: {e}")
+if audio_bytes:
+    st.sidebar.success(f"Ses kaydı alındı! Uzunluk: {len(audio_bytes)} byte")
+
+    # Geçici dosyaya yaz ve Whisper ile çözümlüyoruz
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+        tmp.write(audio_bytes)
+        tmp_path = tmp.name
+
+    with open(tmp_path, "rb") as f:
+        try:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=f,
+                language="tr",
+            )
+            mic_text = transcript.text
+            st.sidebar.info(f"Anlaşılan soru: {mic_text}")
+            # Mikrofon metnini normal soru akışına gönder
+            soruyu_isle(mic_text, pdf_text, extra_text)
+        except Exception as e:
+            st.sidebar.error(f"Ses yazıya çevrilirken hata: {e}")
+
 
     # -------- ⚙️ METNİ İŞLE (YAN PANEL TEK MOD BÖLÜMÜ) --------
     st.sidebar.header("⚙️ Metni işle")
@@ -279,3 +282,4 @@ else:
 
     if soru:
         soruyu_isle(soru, pdf_text, extra_text)
+
