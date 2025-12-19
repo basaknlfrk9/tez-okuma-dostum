@@ -50,11 +50,11 @@ def kelime_istatistikleri(metinler):
     # harf/rakam dizilerini kelime kabul et
     tokens = re.findall(r"\w+", text, flags=re.UNICODE)
 
-    # çok sık ve anlamsız kelimeleri at (Türkçe basit stopword listesi)
+    # çok sık ve anlamsız kelimeleri at (basit stopword seti)
     stop = {
         "ve", "veya", "ile", "ama", "fakat", "çünkü",
         "ben", "sen", "o", "biz", "siz", "onlar",
-        "bu", "şu", "o", "bir", "iki", "üç",
+        "bu", "şu", "bir", "iki", "üç",
         "mi", "mı", "mu", "mü",
         "de", "da", "ki",
         "için", "gibi", "çok", "az",
@@ -185,6 +185,8 @@ if "user" not in st.session_state:
         st.session_state.messages = []      # sadece ekranda göstermek için
         st.session_state.user_texts = []    # analiz için öğrenci soruları
         st.session_state.start_time = datetime.now(ZoneInfo("Europe/Istanbul"))
+        st.session_state.process_mode = None
+        st.session_state.last_audio_len = 0
         st.rerun()
 
 # ------------------ ANA EKRAN ------------------
@@ -317,4 +319,13 @@ else:
                     {"role": "assistant", "content": cevap}
                 )
             except Exception as e:
-                st.error(f"Hata: {e
+                st.error(f"Hata: {e}")
+
+        # işlem bitti, mod bayrağını sıfırla
+        st.session_state.process_mode = None
+
+    # ------------- KLAVYEDEN SORU -------------
+    soru = st.chat_input("Sorunu yaz")
+
+    if soru:
+        soruyu_isle(soru, pdf_text, extra_text)
