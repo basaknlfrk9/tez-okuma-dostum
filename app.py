@@ -191,6 +191,18 @@ if "user" not in st.session_state:
 
 # ------------------ ANA EKRAN ------------------
 else:
+    # ✅ ESKİ OTURUMLARDAN GELİP EKSİK STATE VARSA TAMAMLA
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "user_texts" not in st.session_state:
+        st.session_state.user_texts = []
+    if "start_time" not in st.session_state:
+        st.session_state.start_time = datetime.now(ZoneInfo("Europe/Istanbul"))
+    if "process_mode" not in st.session_state:
+        st.session_state.process_mode = None
+    if "last_audio_len" not in st.session_state:
+        st.session_state.last_audio_len = 0
+
     # ======== YAN PANEL ========
     st.sidebar.success(f"Hoş geldin dostum 🌈 {st.session_state.user}")
 
@@ -219,9 +231,6 @@ else:
     # ------------- METNİ İŞLE (YAN PANEL) -------------
     st.sidebar.header("⚙️ Metni işle")
 
-    if "process_mode" not in st.session_state:
-        st.session_state.process_mode = None
-
     if st.sidebar.button("🅰️ Metni basitleştir"):
         if not (pdf_text or extra_text):
             st.sidebar.warning("Önce PDF yükle veya metin yapıştır 😊")
@@ -237,9 +246,6 @@ else:
     # ======== ORTA ALAN (SOHBET) ========
 
     # Eski mesajları göster (sadece bu oturum)
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.write(m["content"])
