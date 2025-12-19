@@ -166,37 +166,6 @@ else:
     st.sidebar.header("📝 Metin Yapıştır")
     extra_text = st.sidebar.text_area("Metni buraya yapıştır", height=150)
 
-    # Mikrofonla soru sor (YAN PANEL)
-    st.sidebar.header("🎤 Mikrofonla soru sor")
-    audio_bytes = audio_recorder(
-        text="Kaydı başlat / durdur",
-        pause_threshold=2.0,
-        sample_rate=16000,
-        key="mic_recorder_sidebar",
-    )
-
-    if audio_bytes:
-        last_len = st.session_state.get("last_audio_len", 0)
-        if len(audio_bytes) != last_len:
-            st.session_state["last_audio_len"] = len(audio_bytes)
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-
-            with open(tmp_path, "rb") as f:
-                try:
-                    transcript = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=f,
-                        language="tr",
-                    )
-                    mic_text = transcript.text
-                    st.sidebar.info(f"Anlaşılan soru: {mic_text}")
-                    soruyu_isle(mic_text, pdf_text, extra_text)
-                except Exception as e:
-                    st.sidebar.error(f"Ses yazıya çevrilirken hata: {e}")
-
     # Metni işle (YAN PANEL)
     st.sidebar.header("⚙️ Metni işle")
 
@@ -268,12 +237,42 @@ else:
                     st.error(f"Hata: {e}")
 
     # ======== ORTA ALAN (SOHBET) ========
+
+    # Geçmişi çiz
     if "messages" not in st.session_state:
         st.session_state.messages = gecmisi_yukle(st.session_state.user)
 
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.write(m["content"])
+
+    # 🎤 Mikrofonla soru sor – sohbet alanının HEMEN ÜSTÜNDE
+    st.markdown("### 🎤 Mikrofonla soru sor")
+    audio_bytes = audio_recorder(
+        text="Kaydı başlat / durdur",
+        pause_threshold=2.0,
+        sample_rate=16000,
+        key="mic_recorder_main",
+    )
+
+    if audio_bytes:
+        st.info(f"Ses kaydı alındı (byte uzunluğu: {len(audio_bytes)})")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
+
+        with open(tmp_path, "rb") as f:
+            try:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=f,
+                    language="tr",
+                )
+                mic_text = transcript.text
+                st.write(f"🎧 Anlaşılan soru: _{mic_text}_")
+                soruyu_isle(mic_text, pdf_text, extra_text)
+            except Exception as e:
+                st.error(f"Ses yazıya çevrilirken hata: {e}")
 
     # Klavyeden soru
     soru = st.chat_input("Sorunu yaz")
