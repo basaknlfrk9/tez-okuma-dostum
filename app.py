@@ -12,91 +12,67 @@ import re
 from collections import Counter
 from gtts import gTTS
 from io import BytesIO
+import json
 
 # ------------------ SAYFA AYARI ------------------
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 st.title("📚 Okuma Dostum")
 
 # ------------------ OKUNABİLİRLİK CSS ------------------
-st.markdown(
-    """
-    <style>
-      html, body, [class*="css"]  { font-size: 18px !important; }
-      .stChatMessage { line-height: 1.6 !important; }
-      .stMarkdown, .stText { line-height: 1.6 !important; }
-      .okuma-card {
-        padding: 14px 16px;
-        border-radius: 14px;
-        border: 1px solid rgba(0,0,0,0.10);
-        margin-bottom: 10px;
-      }
-      .okuma-title { font-weight: 700; font-size: 18px; margin-bottom: 8px; }
-      .okuma-item { margin: 6px 0; }
-      .okuma-small { opacity: 0.75; font-size: 14px; }
-      .okuma-btn { width: 100%; }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
+st.markdown("""
+<style>
+html, body, [class*="css"] { font-size: 22px !important; }
+p, li, div, span { line-height: 1.75 !important; }
+.stChatMessage p { font-size: 22px !important; line-height: 1.75 !important; }
+.stTextInput input, .stTextArea textarea { font-size: 22px !important; line-height: 1.75 !important; }
+.stMarkdown { word-spacing: 0.10em !important; letter-spacing: 0.01em !important; }
+
+/* Kart görünümü */
+.card{
+  border:1px solid rgba(0,0,0,.12);
+  border-radius:16px;
+  padding:14px 16px;
+  margin:10px 0;
+  background: rgba(255,255,255,.6);
+}
+.badge{
+  display:inline-block;
+  padding:4px 10px;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,.12);
+  font-size:16px;
+  opacity:.85;
+  margin-bottom:8px;
+}
+
+/* Butonlar */
+.stButton button{ border-radius:14px !important; padding:10px 14px !important; }
+
+/* Daha ferah */
+.block-container { padding-top: 1.2rem; padding-bottom: 2.5rem; }
+</style>
+""", unsafe_allow_html=True)
 
 # ------------------ OPENAI CLIENT ------------------
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# ------------------ GOOGLE SHEETS BAĞLANTISI ------------------
+# ------------------ GOOGLE SHEETS ------------------
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-
-credentials = Credentials.from_service_account_info(
-    st.secrets["GSHEETS"],
-    scopes=scope,
-)
-
+credentials = Credentials.from_service_account_info(st.secrets["GSHEETS"], scopes=scope)
 gc = gspread.authorize(credentials)
 workbook = gc.open_by_url(st.secrets["GSHEET_URL"])
 
 stats_sheet = workbook.sheet1
-
 try:
     chat_sheet = workbook.worksheet("Sohbet")
 except WorksheetNotFound:
     chat_sheet = workbook.add_worksheet(title="Sohbet", rows=1000, cols=4)
     chat_sheet.append_row(["Kullanici", "Zaman", "Rol", "Mesaj"])
 
-
-# ------------------ KELİME İSTATİSTİĞİ ------------------
-def kelime_istatistikleri(metinler):
-    if not metinler:
-        return "", ""
-
-    text = " ".join(metinler).lower()
-    tokens = re.findall(r"\w+", text, flags=re.UNICODE)
-
-    stop = {
-        "ve", "veya", "ile", "ama", "fakat", "çünkü",
-        "ben", "sen", "o", "biz", "siz", "onlar",
-        "bu", "şu", "bir", "iki", "üç",
-        "mi", "mı", "mu", "mü",
-        "de", "da", "ki",
-        "için", "gibi", "çok", "az",
-        "ne", "neden", "nasıl", "hangi",
-    }
-
-    words = [t for t in tokens if len(t) > 2 and t not in stop]
-
-    if not words:
-        return "", ""
-
-    counts = Counter(words)
-    en_cok_kelime, _ = counts.most_common(1)[0]
-    top5 = counts.most_common(5)
-    diger = ", ".join([f"{w} ({c})" for w, c in top5])
-
-    return en_cok_kelime, diger
-
-
-# ------------------ SOHBETİ SHEET'E YAZ / YÜKLE ------------------
+# ------------------ UTIL ------------------
 def log_message(user, role, content):
     try:
         now_tr = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
@@ -104,202 +80,221 @@ def log_message(user, role, content):
     except Exception as e:
         st.error(f"Sohbet kaydedilirken hata: {e}")
 
-
 def load_history(user):
     messages = []
     try:
         rows = chat_sheet.get_all_records()
         for r in rows:
             if r.get("Kullanici") == user:
-                rol_raw = str(r.get("Rol", "")).lower()
-                role = "user" if rol_raw == "user" else "assistant"
-                content = r.get("Mesaj", "")
+                role = "user" if str(r.get("Rol","")).lower() == "user" else "assistant"
+                content = r.get("Mesaj","")
                 if content:
                     messages.append({"role": role, "content": content})
     except Exception as e:
         st.error(f"Sohbet geçmişi yüklenemedi: {e}")
     return messages
 
+def kelime_istatistikleri(metinler):
+    if not metinler: return "", ""
+    text = " ".join(metinler).lower()
+    tokens = re.findall(r"\w+", text, flags=re.UNICODE)
+    stop = {"ve","veya","ile","ama","fakat","çünkü","ben","sen","o","biz","siz","onlar","bu","şu",
+            "bir","iki","üç","mi","mı","mu","mü","de","da","ki","için","gibi","çok","az","ne","neden","nasıl","hangi"}
+    words = [t for t in tokens if len(t)>2 and t not in stop]
+    if not words: return "", ""
+    counts = Counter(words)
+    en_cok, _ = counts.most_common(1)[0]
+    top5 = ", ".join([f"{w} ({c})" for w,c in counts.most_common(5)])
+    return en_cok, top5
 
-# ------------------ OTURUM ÖZETİ YAZ ------------------
 def oturum_ozeti_yaz():
-    if "user" not in st.session_state:
-        return
-    if "start_time" not in st.session_state:
-        return
-
+    if "user" not in st.session_state or "start_time" not in st.session_state: return
     now_tr = datetime.now(ZoneInfo("Europe/Istanbul"))
     start = st.session_state.start_time
-
-    dakika = round((now_tr - start).total_seconds() / 60, 1)
+    dakika = round((now_tr-start).total_seconds()/60, 1)
     giris_str = start.strftime("%d.%m.%Y %H:%M:%S")
     cikis_str = now_tr.strftime("%d.%m.%Y %H:%M:%S")
-
-    user_texts = st.session_state.get("user_texts", [])
-    en_cok, diger = kelime_istatistikleri(user_texts)
-
+    en_cok, diger = kelime_istatistikleri(st.session_state.get("user_texts", []))
     try:
-        stats_sheet.append_row(
-            [st.session_state.user, giris_str, cikis_str, dakika, en_cok, diger]
-        )
+        stats_sheet.append_row([st.session_state.user, giris_str, cikis_str, dakika, en_cok, diger])
     except Exception as e:
         st.error(f"Oturum özeti yazılırken hata: {e}")
 
+# ------------------ TTS: noktalama/emoji temizle ------------------
+def clean_for_tts(text: str) -> str:
+    t = text
+    t = re.sub(r"\*\*(.*?)\*\*", r"\1", t)      # **kalın** temizle
+    t = re.sub(r"[✅🧩🖼️💡❓🔊🆘🎤📚]", " ", t)  # emojiler
+    t = re.sub(r"[#>\[\]\(\)\{\}_`~^=|\\/@]", " ", t)
+    t = re.sub(r"[:;,.!?…“”\"'’\-–—]", " ", t)  # noktalama (TTS okumasın)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
 
-# ------------------ TTS (gTTS) ------------------
 def tts_bytes(text: str) -> bytes:
-    # Çok uzun metin TTS'te sorun çıkarabiliyor; güvenli kırp.
-    safe = text.strip()
+    safe = clean_for_tts(text)
     if len(safe) > 1200:
         safe = safe[:1200] + " ..."
     mp3_fp = BytesIO()
-    tts = gTTS(safe, lang="tr")
-    tts.write_to_fp(mp3_fp)
+    gTTS(safe, lang="tr").write_to_fp(mp3_fp)
     return mp3_fp.getvalue()
 
+# ------------------ MODEL: JSON çıktısı zorunlu ------------------
+def system_prompt_json():
+    return """
+Sen, özel öğrenme güçlüğü (Disleksi, Diskalkuli, Disgrafi) yaşayan ortaokul öğrencileri için okuma dostu yardımcı öğretmensin.
 
-# ------------------ PROMPT ŞABLONU ------------------
-def build_system_prompt():
-    return (
-        "Sen, özel öğrenme güçlüğü (Disleksi, Diskalkuli, Disgrafi) yaşayan ortaokul "
-        "öğrencileri için okuma dostu bir yardımcı öğretmensin.\n\n"
-        "ZORUNLU YAZIM KURALLARI:\n"
-        "- Paragraf yok. Sadece MADDE MADDE yaz.\n"
-        "- Kısa cümle: 1 cümlede 1 fikir.\n"
-        "- En fazla 7 madde.\n"
-        "- Zor kelime varsa parantez içinde kısaca açıkla.\n"
-        "- Anahtar kelimeleri **kalın** yaz.\n\n"
-        "ZORUNLU CEVAP AKIŞI (her soruda sırayla):\n"
-        "1) ❓ Merak (1 soru)\n"
-        "2) 🖼️ Görsel (1 cümlelik benzetme, gerçek görsel gerekmez)\n"
-        "3) 💡 İpucu 1 (kolay)\n"
-        "4) 💡 İpucu 2 (örnek)\n"
-        "5) ✅ Kısa cevap\n"
-        "6) 🧩 Kontrol (1 soru)\n"
-        "7) 🔊 Dinle ister misin? (Evet/Hayır)  |  🆘 Yardım ister misin? (Evet/Hayır)\n\n"
-        "ÖĞRENCİYE UYGUNLUK:\n"
-        "- Disleksi: kısa, net, madde, adım adım.\n"
-        "- Disgrafi: uzun yazı isteme; seçenek sun (A/B/C).\n"
-        "- Diskalkuli: işlem varsa adım adım örnekle.\n"
+ÇIKTIYI SADECE JSON olarak ver. Başka hiçbir şey yazma.
+
+Kurallar:
+- Kısa cümle.
+- Basit kelime.
+- Her alan 1-2 cümle.
+- emojis alanı 3 emoji olsun.
+- ipucu1 ve ipucu2 kısa olsun.
+- kisa_cevap tek cümle.
+- kontrol_sorusu tek soru.
+
+JSON ŞEMASI:
+{
+  "dikkat": "1 kısa merak uyandıran soru",
+  "emojis": "3 emoji (örn: ⚙️🧩🔧)",
+  "gorsel": "1 cümlelik benzetme (gerçek resim gerekmez)",
+  "ipucu1": "kolay ipucu",
+  "ipucu2": "örnek ipucu",
+  "kisa_cevap": "en net kısa cevap",
+  "kontrol_sorusu": "1 kontrol sorusu"
+}
+"""
+
+def make_step_card(label, text):
+    st.markdown(f"""
+    <div class="card">
+      <div class="badge">{label}</div>
+      <div>{text}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def ask_model_steps(user_question: str, pdf_text: str, extra_text: str):
+    content = ""
+    if pdf_text:
+        content += "PDF:\n" + pdf_text[:900] + "\n\n"
+    if extra_text:
+        content += "Metin:\n" + extra_text[:900] + "\n\n"
+    prompt = (content + "Soru:\n" + user_question) if content else user_question
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role":"system","content":system_prompt_json()},
+            {"role":"user","content":prompt},
+        ],
     )
+    raw = resp.choices[0].message.content.strip()
 
+    # JSON parse güvenliği
+    try:
+        data = json.loads(raw)
+    except:
+        # model bazen JSON dışına taşarsa kurtarma
+        m = re.search(r"\{.*\}", raw, flags=re.S)
+        data = json.loads(m.group(0)) if m else {
+            "dikkat": "Hazır mısın?",
+            "emojis": "🙂📌✅",
+            "gorsel": "Kısa bir örnekle düşünelim.",
+            "ipucu1": "Kısa ipucu.",
+            "ipucu2": "Kısa örnek.",
+            "kisa_cevap": "Kısa cevap.",
+            "kontrol_sorusu": "Anladın mı?"
+        }
+    return data
 
-# ------------------ SORU CEVAPLAMA ------------------
+# ------------------ SORU İŞLE (adım adım) ------------------
 def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
     with st.chat_message("user"):
         st.write(soru)
 
-    st.session_state.messages.append({"role": "user", "content": soru})
+    st.session_state.messages.append({"role":"user","content":soru})
     st.session_state.user_texts.append(soru)
     st.session_state.last_user_text = soru
-
-    if "user" in st.session_state:
-        log_message(st.session_state.user, "user", soru)
-
-    icerik = ""
-    if pdf_text:
-        icerik += "PDF metni:\n" + pdf_text[:900] + "\n\n"
-    if extra_text:
-        icerik += "Ek metin:\n" + extra_text[:900] + "\n\n"
-
-    tam_soru = (icerik + "Öğrencinin sorusu:\n" + soru) if icerik else soru
-
-    system_prompt = build_system_prompt()
+    log_message(st.session_state.user, "user", soru)
 
     with st.chat_message("assistant"):
         try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": tam_soru},
-                ],
+            steps = ask_model_steps(soru, pdf_text, extra_text)
+            st.session_state.last_steps = steps
+            st.session_state.reveal = 1  # 1: dikkat+görsel, 2: +ipucu1, 3:+ipucu2, 4:+cevap, 5:+kontrol
+
+            # Ekrana sadece 1. adımı bas
+            make_step_card("1) ❓ Dikkat", steps["dikkat"])
+            make_step_card("2) 🖼️ Görsel", f'{steps["emojis"]} — {steps["gorsel"]}')
+
+            # Ayrıca sohbet geçmişine "tek satır" değil, düzenli özet kaydı
+            display_text = (
+                f'❓ {steps["dikkat"]}\n'
+                f'🖼️ {steps["emojis"]} {steps["gorsel"]}\n'
+                f'💡 {steps["ipucu1"]}\n'
+                f'💡 {steps["ipucu2"]}\n'
+                f'✅ {steps["kisa_cevap"]}\n'
+                f'🧩 {steps["kontrol_sorusu"]}'
             )
-            cevap = response.choices[0].message.content
-            st.write(cevap)
-
-            st.session_state.messages.append({"role": "assistant", "content": cevap})
-            st.session_state.last_assistant_text = cevap  # 🔊 dinlemek için
-
-            if "user" in st.session_state:
-                log_message(st.session_state.user, "assistant", cevap)
+            st.session_state.messages.append({"role":"assistant","content":display_text})
+            st.session_state.last_assistant_text = display_text
+            log_message(st.session_state.user, "assistant", display_text)
 
         except Exception as e:
             st.error(f"Hata: {e}")
 
-
-# ------------------ GİRİŞ EKRANI ------------------
+# ------------------ GİRİŞ ------------------
 if "user" not in st.session_state:
     st.subheader("👋 Hoş geldin Dostum")
     isim = st.text_input("Adını yaz:")
 
     if st.button("Giriş Yap") and isim.strip():
-        isim = isim.strip()
-        st.session_state.user = isim
-        st.session_state.messages = load_history(isim)
-
+        st.session_state.user = isim.strip()
+        st.session_state.messages = load_history(st.session_state.user)
         st.session_state.user_texts = []
         st.session_state.start_time = datetime.now(ZoneInfo("Europe/Istanbul"))
-        st.session_state.process_mode = None
-        st.session_state.last_audio_len = 0
         st.session_state.last_user_text = ""
         st.session_state.last_assistant_text = ""
+        st.session_state.last_steps = None
+        st.session_state.reveal = 0
 
-        # İlk yönerge (tek ekran, yardım, dinle)
         intro = (
-            "✅ Ben kısa ve kolay anlatırım.\n\n"
-            "• Sorunu **yazarak** sorabilirsin.\n"
-            "• İstersen **🎤 sesle** sorabilirsin.\n"
+            "✅ Ben kısa ve kolay anlatırım.\n"
+            "• Önce **dikkat** + **görsel** ile başlarım.\n"
+            "• Sonra **ipucu** veririm.\n"
+            "• En sonda **kısa cevap** ve **kontrol sorusu** olur.\n"
             "• İstersen **🔊 Dinle** ile dinleyebilirsin.\n"
-            "• Takılırsan **🆘 Yardım** butonuna bas.\n\n"
             "Hazırsan bir soru sor 😊"
         )
         if not st.session_state.messages:
-            st.session_state.messages.append({"role": "assistant", "content": intro})
+            st.session_state.messages.append({"role":"assistant","content":intro})
         st.rerun()
 
 # ------------------ ANA EKRAN ------------------
 else:
-    # Eksik state'leri tamamla
-    st.session_state.setdefault("messages", [])
-    st.session_state.setdefault("user_texts", [])
-    st.session_state.setdefault("start_time", datetime.now(ZoneInfo("Europe/Istanbul")))
-    st.session_state.setdefault("process_mode", None)
-    st.session_state.setdefault("last_audio_len", 0)
-    st.session_state.setdefault("last_user_text", "")
-    st.session_state.setdefault("last_assistant_text", "")
-
-    # ÜST BAR: Çıkış + Yardım
-    top_c1, top_c2, top_c3 = st.columns([2, 1, 1])
-    with top_c1:
-        st.success(f"Hoş geldin 🌈 {st.session_state.user}")
-    with top_c2:
+    top1, top2, top3 = st.columns([2,1,1])
+    with top1:
+        st.success(f"Hoş geldin ✍️ {st.session_state.user}")
+    with top2:
         if st.button("🆘 Yardım", use_container_width=True):
-            st.session_state.show_help = True
-    with top_c3:
+            st.session_state.show_help = not st.session_state.get("show_help", False)
+    with top3:
         if st.button("Çıkış Yap", use_container_width=True):
             oturum_ozeti_yaz()
             st.session_state.clear()
             st.rerun()
 
-    if st.session_state.get("show_help"):
-        with st.expander("🆘 Yardım Menüsü", expanded=True):
-            st.markdown(
-                """
-                - “**Daha kolay anlat**” yazabilirsin.  
-                - “**Örnek ver**” yazabilirsin.  
-                - “**Adım adım** anlat” yazabilirsin.  
-                - “**Tekrar et**” yazabilirsin.  
-                - **🔊 Dinle** ile dinleyebilirsin.
-                """
-            )
+    if st.session_state.get("show_help", False):
+        with st.expander("🆘 Yardım", expanded=True):
+            st.markdown("- **Daha kolay anlat** yaz.\n- **Örnek ver** yaz.\n- **Adım adım** yaz.\n- **Tekrar et** yaz.\n- **🔊 Dinle** ile dinle.")
 
-    # TEK ALAN: PDF / Metin (sidebar yok)
+    # PDF / Metin (sade)
     with st.expander("📄 PDF / Metin (İstersen ekle)", expanded=False):
         c1, c2 = st.columns(2)
+        pdf_text = ""
+        extra_text = ""
         with c1:
-            st.markdown("**PDF yükle**")
-            pdf_text = ""
             pdf_file = st.file_uploader("PDF seç", type="pdf")
             if pdf_file is not None:
                 reader = PdfReader(pdf_file)
@@ -308,83 +303,42 @@ else:
                     if txt:
                         pdf_text += txt + "\n"
         with c2:
-            st.markdown("**Metin yapıştır**")
-            extra_text = st.text_area("Metni buraya yapıştır", height=180)
+            extra_text = st.text_area("Metni buraya yapıştır", height=160)
 
-    # pdf_text / extra_text expander dışında da lazım
-    pdf_text = locals().get("pdf_text", "")
-    extra_text = locals().get("extra_text", "")
-
-    # TEK BUTON ŞERİDİ: Basitleştir / Maddele
-    b1, b2, b3 = st.columns([1, 1, 2])
-    with b1:
-        if st.button("🅰️ Metni basitleştir", use_container_width=True):
-            if not (pdf_text or extra_text or st.session_state.last_user_text):
-                st.warning("Önce PDF, metin ya da bir soru olmalı 😊")
-            else:
-                st.session_state.process_mode = "basit"
-    with b2:
-        if st.button("🧩 Madde madde açıkla", use_container_width=True):
-            if not (pdf_text or extra_text or st.session_state.last_user_text):
-                st.warning("Önce PDF, metin ya da bir soru olmalı 😊")
-            else:
-                st.session_state.process_mode = "madde"
-    with b3:
-        st.caption("İpucu: Metin uzun gelirse “daha kolay anlat” yaz.")
-
-    # SOHBET GEÇMİŞİ
+    # Sohbet geçmişi
     for m in st.session_state.messages:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
-    # METNİ İŞLEME ÇIKTISI
-    if st.session_state.get("process_mode") in ("basit", "madde") and (
-        pdf_text or extra_text or st.session_state.last_user_text
-    ):
-        parcalar = []
-        if pdf_text:
-            parcalar.append(pdf_text)
-        if extra_text:
-            parcalar.append(extra_text)
-        if st.session_state.last_user_text:
-            parcalar.append(st.session_state.last_user_text)
+    # ADIM ADIM DEVAM BUTONLARI (tek akış)
+    steps = st.session_state.get("last_steps")
+    if steps:
+        st.markdown("### 🔽 Adım adım devam")
+        b1, b2, b3, b4 = st.columns(4)
+        with b1:
+            if st.button("💡 İpucu 1", use_container_width=True):
+                st.session_state.reveal = max(st.session_state.reveal, 2)
+        with b2:
+            if st.button("💡 İpucu 2", use_container_width=True):
+                st.session_state.reveal = max(st.session_state.reveal, 3)
+        with b3:
+            if st.button("✅ Kısa cevap", use_container_width=True):
+                st.session_state.reveal = max(st.session_state.reveal, 4)
+        with b4:
+            if st.button("🧩 Kontrol", use_container_width=True):
+                st.session_state.reveal = max(st.session_state.reveal, 5)
 
-        kaynak_metin = "\n".join(parcalar).strip()
+        # Gösterim (kartlarla ve boşluklu)
+        if st.session_state.reveal >= 2:
+            make_step_card("3) 💡 İpucu 1", steps["ipucu1"])
+        if st.session_state.reveal >= 3:
+            make_step_card("4) 💡 İpucu 2", steps["ipucu2"])
+        if st.session_state.reveal >= 4:
+            make_step_card("5) ✅ Kısa cevap", steps["kisa_cevap"])
+        if st.session_state.reveal >= 5:
+            make_step_card("6) 🧩 Kontrol", steps["kontrol_sorusu"])
 
-        with st.chat_message("assistant"):
-            if st.session_state.process_mode == "basit":
-                st.markdown("### 🅰️ Basitleştirilmiş Hali")
-                system_prompt = build_system_prompt()
-                user_content = (
-                    "Aşağıdaki metni **okuma güçlüğü olan** ortaokul öğrencisine göre "
-                    "**kısa cümlelerle ve madde madde** anlat:\n\n" + kaynak_metin
-                )
-            else:
-                st.markdown("### 🧩 Madde Madde")
-                system_prompt = build_system_prompt()
-                user_content = (
-                    "Aşağıdaki metnin en önemli noktalarını **kısa maddelerle** çıkar:\n\n"
-                    + kaynak_metin
-                )
-
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_content},
-                    ],
-                )
-                cevap = response.choices[0].message.content
-                st.write(cevap)
-                st.session_state.messages.append({"role": "assistant", "content": cevap})
-                st.session_state.last_assistant_text = cevap
-            except Exception as e:
-                st.error(f"Hata: {e}")
-
-        st.session_state.process_mode = None
-
-    # MİKROFON (ANA EKRANDA, SABİT)
+    # Mikrofon (sabit)
     with st.expander("🎤 Sesle soru sor (tıkla–konuş–durdur)", expanded=False):
         audio_bytes = audio_recorder(
             text="Konuşmak için tıkla",
@@ -417,21 +371,20 @@ else:
                 except Exception as e:
                     st.error(f"Ses yazıya çevrilirken hata oluştu: {e}")
 
-    # 🔊 SON CEVABI DİNLE
-    listen_c1, listen_c2 = st.columns([1, 3])
-    with listen_c1:
-        if st.button("🔊 Son cevabı dinle", use_container_width=True):
-            if st.session_state.get("last_assistant_text", "").strip():
-                try:
-                    audio_mp3 = tts_bytes(st.session_state.last_assistant_text)
-                    st.audio(audio_mp3, format="audio/mp3")
-                    st.caption("Metin ekranda akıyor. Dinlerken takip edebilirsin.")
-                except Exception as e:
-                    st.error(f"Sesli okuma hatası: {e}")
-            else:
-                st.warning("Dinlenecek bir cevap yok.")
+    # Sesli dinle (temizlenmiş TTS)
+    if st.button("🔊 Son cevabı dinle", use_container_width=True):
+        t = st.session_state.get("last_assistant_text", "")
+        if t.strip():
+            try:
+                audio_mp3 = tts_bytes(t)
+                st.audio(audio_mp3, format="audio/mp3")
+                st.caption("Noktalama/emoji temizlendi. Daha doğal okunur.")
+            except Exception as e:
+                st.error(f"Sesli okuma hatası: {e}")
+        else:
+            st.warning("Dinlenecek bir cevap yok.")
 
-    # KLAVYEDEN SORU
+    # Yazıyla soru
     soru = st.chat_input("Sorunu yaz")
     if soru:
         soruyu_isle(soru, pdf_text, extra_text)
