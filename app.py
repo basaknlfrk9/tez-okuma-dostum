@@ -3,58 +3,34 @@ from PyPDF2 import PdfReader
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import gspread
-from gspread.exceptions import WorksheetNotFound
 from google.oauth2.service_account import Credentials
 from openai import OpenAI
-from audio_recorder_streamlit import audio_recorder
-from gtts import gTTS
-from io import BytesIO
-import tempfile
 import re
 import json
 import uuid
 import time
+from gtts import gTTS
+from io import BytesIO
 
 # =========================================================
-# OKUMA DOSTUM — ÖÖG & MEB DESTEKLİ SİSTEM
+# OKUMA DOSTUM — ÖÖG & GELİŞİM TAKİP SİSTEMİ (NİHAİ)
 # =========================================================
 
-st.set_page_config(page_title="Okuma Dostum", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
-# ÖÖG Dostu Görsel Ayarlar (Geniş boşluklar, okunaklı fontlar)
-st.markdown(
-    """
+# ÖÖG Dostu Görsel Stil (Büyük font, geniş satır aralığı)
+st.markdown("""
 <style>
-html, body, [class*="css"] { font-size: 22px !important; }
-p, li, div, span { line-height: 2.0 !important; }
-.stChatMessage p { font-size: 22px !important; line-height: 2.0 !important; }
-.stTextInput input, .stTextArea textarea {
-  font-size: 20px !important; line-height: 1.8 !important; padding: 15px !important;
-}
-.stButton button{ font-size: 20px !important; border-radius: 20px !important; padding: 12px 20px !important; font-weight: bold !important; }
-.stMarkdown { word-spacing: 0.20em !important; letter-spacing: 0.03em !important; }
-.block-container { padding-top: 2rem; max-width: 1000px; margin: auto; }
-.card{
-  border: 2px solid #e0e0e0;
-  border-radius: 20px; padding: 20px; margin: 15px 0;
-  background: #ffffff;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-}
-.badge{
-  display:inline-block; padding:8px 16px; border-radius:12px;
-  background: #f0f2f6; color: #1f77b4; font-weight: bold; margin-bottom:12px;
-}
-.highlight-text {
-    background-color: #fcfcfc;
-    padding: 25px;
-    border-left: 10px solid #ff4b4b;
-    border-radius: 10px;
-    font-size: 24px !important;
-}
+    html, body, [class*="css"] { font-size: 22px !important; }
+    p, li, div, span { line-height: 2.1 !important; word-spacing: 0.15em !important; }
+    .stButton button { font-size: 20px !important; border-radius: 15px !important; padding: 12px !important; }
+    .highlight-box {
+        background-color: #fcfcfc; padding: 30px; border-radius: 20px;
+        border: 2px solid #e0e0e0; font-size: 24px !important; margin-bottom: 20px;
+    }
+    .card { border: 1px solid #ddd; border-radius: 15px; padding: 20px; background: white; margin-bottom: 10px; }
 </style>
-""",
-    unsafe_allow_html=True,
-)
+""", unsafe_allow_html=True)
 
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -63,213 +39,151 @@ scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis
 credentials = Credentials.from_service_account_info(st.secrets["GSHEETS"], scopes=scope)
 gc = gspread.authorize(credentials)
 workbook = gc.open_by_url(st.secrets["GSHEET_URL"])
-
-try:
-    chat_sheet = workbook.worksheet("Sohbet")
-except WorksheetNotFound:
-    chat_sheet = workbook.add_worksheet(title="Sohbet", rows=5000, cols=25)
-
-try:
-    perf_sheet = workbook.worksheet("Performans")
-except WorksheetNotFound:
-    perf_sheet = workbook.add_worksheet(title="Performans", rows=5000, cols=25)
+perf_sheet = workbook.worksheet("Performans")
 
 def now_tr_str():
     return datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
 
-def sheet_append_safe(sheet, row):
-    try:
-        sheet.append_row(row)
-    except Exception as e:
-        st.error(f"Kayıt hatası: {e}")
-
-# ------------------ Ses ve Metin İşleme ------------------
-def clean_for_tts(text: str) -> str:
-    t = re.sub(r"\*\*(.*?)\*\*", r"\1", text)
-    t = re.sub(r"[#>\[\]\(\)\{\}_`~^=|\\/@]", " ", t)
-    return t.strip()
-
+# ------------------ Seslendirme (TTS) ------------------
 def tts_bytes(text: str) -> bytes:
-    safe = clean_for_tts(text)
+    clean_text = re.sub(r"[*#_]", "", text)
     mp3_fp = BytesIO()
-    gTTS(safe[:1200], lang="tr").write_to_fp(mp3_fp)
+    gTTS(clean_text[:1000], lang="tr").write_to_fp(mp3_fp)
     return mp3_fp.getvalue()
 
-# ------------------ AI Zekası (ÖÖG Odaklı) ------------------
-def system_prompt_meb_json():
-    return """
-Sen, özel öğrenme güçlüğü (disleksi vb.) olan ortaokul öğrencileri için materyal düzenleyen uzman bir öğretmensin.
-SUNUŞ YOLUYLA ÖĞRETİM stratejisini kullan.
-
-GÖREVİN:
-1) 'duzenlenmis_metin': Kaynak metni öğrencinin okuyabileceği hale getir. Cümleleri çok kısa tut. Karmaşık kelimeleri basitleştir.
-2) 'kelime_destek': Metindeki en önemli 3 kelimeyi ve çocuksu/basit anlamlarını yaz.
-3) 'sorular': 6 adet çoktan seçmeli (A, B, C) soru hazırla. Sorular net ve kısa olsun.
-
-ÇIKTI SADECE JSON.
-JSON YAPISI:
-{
-  "acilis": "Motivasyon cümlesi",
-  "duzenlenmis_metin": "Sadeleştirilmiş, kısa cümleli metin",
-  "kelime_destek": [{"kelime":"", "anlam":""}],
-  "sorular": [
-    {"id":"Q1", "tur":"bilgi|cikarim|ana_fikir|baslik|kelime", "kok":"", "A":"", "B":"", "C":"", "dogru":"A", "aciklama":"", "ipucu":""}
-  ],
-  "kisa_tekrar": "Özet cümle"
-}
-"""
-
-def safe_json_load(raw: str) -> dict:
-    try:
-        return json.loads(re.search(r"\{.*\}", raw, flags=re.S).group(0))
-    except:
-        return {}
-
-def ask_meb_activity(source_text: str) -> dict:
+# ------------------ AI Zekası (ÖÖG Sadeleştirme) ------------------
+def get_ai_activity(source_text: str):
+    system_prompt = """
+    Sen ÖÖG (Disleksi) uzmanı bir Türkçe öğretmenisin. 
+    1) 'sade_metin': Metni 5-8. sınıf seviyesinde, kısa cümlelerle, somutlaştırarak yeniden yaz.
+    2) 'kelimeler': Metindeki 3 zor kelime ve basit anlamı.
+    3) 'sorular': 6 adet (A,B,C) çoktan seçmeli soru. Türler: 'bilgi', 'cikarim', 'ana_fikir', 'baslik', 'kelime'.
+    Çıktı sadece JSON olsun.
+    """
     resp = client.chat.completions.create(
-        model="gpt-4o", # Daha iyi analiz için gpt-4o önerilir
+        model="gpt-4o",
         messages=[
-            {"role": "system", "content": system_prompt_meb_json()},
-            {"role": "user", "content": f"Şu metni öğrenci için işle:\n\n{source_text}"},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Metin: {source_text}"}
         ],
-        temperature=0.3
+        response_format={ "type": "json_object" }
     )
-    d = safe_json_load(resp.choices[0].message.content)
-    return d
+    return json.loads(resp.choices[0].message.content)
 
-# ------------------ Dosya ve Metin Fonksiyonları ------------------
-def read_pdf_text(pdf_file) -> str:
-    try:
-        reader = PdfReader(pdf_file)
-        return "\n".join([p.extract_text() for p in reader.pages if p.extract_text()])
-    except:
-        return ""
+# ------------------ Gelişim Kayıt (Tablonuza Uygun) ------------------
+def performans_kaydet_to_sheets():
+    # Süre ve Başarı Hesapla
+    sure_saniye = time.time() - st.session_state.start_time_stamp
+    dakika = round(sure_saniye / 60, 2)
+    
+    act = st.session_state.activity
+    dogru_sayisi = sum(st.session_state.correct_map.values())
+    basari_yuzde = round((dogru_sayisi / 6) * 100, 1)
+    
+    # Hatalı Kazanımları Bul (Gelişim takibi için kritik)
+    hatalar = []
+    for i, q in enumerate(act['sorular']):
+        if st.session_state.correct_map.get(i) == 0:
+            hatalar.append(q.get('tur', 'genel'))
+    kazanim_notu = ", ".join(set(hatalar)) if hatalar else "Eksik Yok"
+
+    # Tablodaki A'dan J'ye kadar olan sütunlar
+    row = [
+        st.session_state.user,          # A: Kullanici
+        st.session_state.login_time,    # B: Giris
+        now_tr_str(),                   # C: Cikis
+        dakika,                         # D: Dakika
+        st.session_state.sinif,         # E: Sinif
+        f"%{basari_yuzde}",             # F: Basari_Yuzdesi
+        dogru_sayisi,                   # G: Dogru_Sayisi
+        st.session_state.total_ipucu,   # H: Ipucu_Sayisi
+        kazanim_notu,                   # I: Hatali_Kazanimlar
+        st.session_state.metin_id       # J: Metin_ID
+    ]
+    perf_sheet.append_row(row)
 
 # =========================================================
-# ARA YÜZ VE MANTIĞI
+# UYGULAMA AKIŞI
 # =========================================================
+
 if "user" not in st.session_state:
-    st.markdown("<h1 style='text-align:center;'>📚 Okuma Dostum</h1>", unsafe_allow_html=True)
-    isim = st.text_input("Adın nedir?")
-    sinif = st.selectbox("Sınıfın?", ["5", "6", "7", "8"])
-    if st.button("Başla!", use_container_width=True) and isim:
-        st.session_state.user = isim
-        st.session_state.sinif = sinif
-        st.session_state.session_id = str(uuid.uuid4())[:8]
-        st.session_state.phase = "idle"
+    st.title("📚 Okuma Dostum")
+    st.session_state.user = st.text_input("Adın:")
+    st.session_state.sinif = st.selectbox("Sınıfın:", ["5", "6", "7", "8"])
+    if st.button("Başla") and st.session_state.user:
+        st.session_state.login_time = now_tr_str()
+        st.session_state.phase = "setup"
         st.rerun()
     st.stop()
 
-# Üst Panel
-st.markdown(f"### Merhaba {st.session_state.user}! Bugün ne okuyoruz?")
+# Üst Bilgi
+st.write(f"👤 {st.session_state.user} | {st.session_state.sinif}. Sınıf")
 
-# Sidebar: Metin Yükleme
-with st.sidebar:
-    st.title("Öğretmen Paneli")
-    pdf_file = st.file_uploader("MEB Kitabı PDF Yükle", type="pdf")
-    extra_text = st.text_area("Veya Metni Buraya Yapıştır", height=200)
+# 1. KURULUM (Öğretmen Metni Yükler)
+if st.session_state.phase == "setup":
+    st.subheader("Öğretmen Paneli: Metni Hazırla")
+    m_id = st.text_input("Metin ID (Örn: Ünite1_Metin1)")
+    uploaded_file = st.file_uploader("MEB PDF Yükle", type="pdf")
+    pasted_text = st.text_area("Veya Metni Yapıştır")
     
-    if st.button("Metni Sisteme Yükle"):
-        raw_text = extra_text
-        if pdf_file:
-            raw_text = read_pdf_text(pdf_file) + "\n" + extra_text
+    if st.button("Çalışmayı Başlat"):
+        raw = pasted_text
+        if uploaded_file:
+            reader = PdfReader(uploaded_file)
+            raw = "\n".join([p.extract_text() for p in reader.pages])
         
-        with st.spinner("Öğrenciye göre düzenleniyor..."):
-            activity = ask_meb_activity(raw_text)
-            st.session_state.activity = activity
-            st.session_state.full_text = activity.get("duzenlenmis_metin", raw_text)
+        with st.spinner("ÖÖG seviyesine göre düzenleniyor..."):
+            st.session_state.activity = get_ai_activity(raw)
+            st.session_state.metin_id = m_id
             st.session_state.phase = "read"
+            st.session_state.start_time_stamp = time.time() # Dakika ölçümü için
             st.session_state.q_index = 0
             st.session_state.correct_map = {}
-            st.session_state.last_listen_text = activity.get("acilis", "")
-            st.success("Metin hazır!")
+            st.session_state.total_ipucu = 0
             st.rerun()
-    
-    if st.button("Çıkış Yap"):
-        st.session_state.clear()
-        st.rerun()
 
-# ------------------ EKRANLAR (PHASES) ------------------
-
-# 1. OKUMA EKRANI
-if st.session_state.get("phase") == "read":
+# 2. OKUMA AŞAMASI
+elif st.session_state.phase == "read":
     act = st.session_state.activity
-    st.info(f"🎯 Hedef: {act.get('acilis')}")
+    st.markdown(f"<div class='highlight-box'>{act['sade_metin']}</div>", unsafe_allow_html=True)
     
-    st.markdown(f"<div class='highlight-text'>{st.session_state.full_text}</div>", unsafe_allow_html=True)
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("🔊 Metni Dinle", use_container_width=True):
-            st.audio(tts_bytes(st.session_state.full_text))
-    with c2:
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔊 Dinle", use_container_width=True):
+            st.audio(tts_bytes(act['sade_metin']))
+    with col2:
         if st.button("✅ Okudum, Sorulara Geç", use_container_width=True):
             st.session_state.phase = "questions"
-            st.session_state.q_started_at = time.time()
             st.rerun()
 
-# 2. SORU EKRANI
-elif st.session_state.get("phase") == "questions":
+# 3. SORULAR AŞAMASI
+elif st.session_state.phase == "questions":
     act = st.session_state.activity
-    sorular = act.get("sorular", [])
     idx = st.session_state.q_index
-
-    if idx < len(sorular):
-        q = sorular[idx]
+    
+    if idx < len(act['sorular']):
+        q = act['sorular'][idx]
+        st.markdown(f"<div class='card'><b>Soru {idx+1}:</b> {q['kok']}</div>", unsafe_allow_html=True)
         
-        # Kelime desteğini göster
-        if idx == 0 and act.get("kelime_destek"):
-            with st.expander("💡 Önemli Kelimeler", expanded=True):
-                for k in act["kelime_destek"]:
-                    st.write(f"**{k['kelime']}**: {k['anlam']}")
-
-        st.markdown(f"### Soru {idx+1}/{len(sorular)}")
-        st.markdown(f"<div class='card'>{q['kok']}</div>", unsafe_allow_html=True)
-        
-        colA, colB, colC = st.columns(3)
-        for label, col in zip(["A", "B", "C"], [colA, colB, colC]):
-            with col:
-                if st.button(f"{label}) {q[label]}", use_container_width=True):
-                    # Cevap kontrolü
-                    is_correct = 1 if label == q["dogru"] else 0
-                    st.session_state.correct_map[idx] = is_correct
-                    
-                    if is_correct:
-                        st.balloons()
-                        st.success("Harikasın! Doğru.")
-                    else:
-                        st.error(f"Üzülme, doğru cevap {q['dogru']}. {q['aciklama']}")
-                    
-                    time.sleep(2)
-                    st.session_state.q_index += 1
-                    st.rerun()
+        for opt in ["A", "B", "C"]:
+            if st.button(f"{opt}) {q[opt]}", key=f"btn_{idx}_{opt}"):
+                st.session_state.correct_map[idx] = 1 if opt == q['dogru'] else 0
+                st.session_state.q_index += 1
+                st.rerun()
         
         if st.button("💡 İpucu Al"):
-            st.info(q.get("ipucu", "Metne tekrar bakmayı dene!"))
+            st.session_state.total_ipucu += 1
+            st.info(q.get('ipucu', 'Metne tekrar göz at!'))
     else:
-        st.session_state.phase = "done"
-        st.rerun()
+        with st.spinner("Sonuçlar kaydediliyor..."):
+            performans_kaydet_to_sheets()
+            st.session_state.phase = "done"
+            st.rerun()
 
-# 3. BİTİŞ EKRANI
-elif st.session_state.get("phase") == "done":
-    st.success("Tebrikler! Çalışmayı tamamladın.")
-    dogru_sayisi = sum(st.session_state.correct_map.values())
-    st.metric("Doğru Sayısı", f"{dogru_sayisi} / 6")
-    
-    # Sheets'e performans kaydet
-    if st.button("Yeni Metne Geç"):
-        st.session_state.phase = "idle"
+# 4. BİTİŞ
+elif st.session_state.phase == "done":
+    st.balloons()
+    st.success("Harika! Çalışma bitti ve öğretmenine gönderildi.")
+    if st.button("Yeni Çalışma Yap"):
+        st.session_state.phase = "setup"
         st.rerun()
-
-# Alt Çubuk (Mikrofon ve Notlar)
-if st.session_state.get("user"):
-    st.markdown("---")
-    c1, c2, c3 = st.columns([6, 2, 2])
-    with c1:
-        note = st.text_input("Bir notun var mı?", key="user_note")
-    with c2:
-        if st.button("🔊 Dinle", use_container_width=True):
-            st.audio(tts_bytes(st.session_state.get("last_listen_text", "Harika gidiyorsun!")))
-    with c3:
-         # Basit mikrofon tetikleyici (Geliştirilebilir)
-         st.write("🎤 Sesli komut aktif")
