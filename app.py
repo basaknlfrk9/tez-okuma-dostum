@@ -15,51 +15,89 @@ from io import BytesIO
 import json
 
 # =========================================================
-#  OKUMA DOSTUM — ÖÖG + SUNUŞ YOLUYLA ÖĞRETİM (DERS SENARYOSU)
-#  Öğretmen metin/PDF verir → öğrenci chatbotla okur → ana fikir/tema → sorular
-#  Tasarım: sade, büyük punto, az buton, etiket yok.
+# OKUMA DOSTUM — ÖÖG + Sunuş Yoluyla (Metinden okuma → ana fikir → sorular)
+# UI İsteklerin:
+# - Giriş ekranı (tamam)
+# - Giriş sonrası:
+#   * Üstte ortada "Okuma Dostum" (tam görünsün)
+#   * Sol: 📚 ve altında kullanıcı adı
+#   * Sağ: Çıkış paneli
+#   * Sol panel (açılır): PDF Yükle / Metin Yapıştır (iki ayrı panel)
+#   * Altta sohbet çubuğunun bitişinde: 🎤 ve 🔊
+# - Punto 12 + kelime/harf boşlukları (ÖÖG)
 # =========================================================
 
 # ------------------ SAYFA AYARI ------------------
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
-# ------------------ ÖÖG DOSTU CSS ------------------
+# ------------------ ÖÖG DOSTU CSS (PUNTO 12 + BOŞLUK) ------------------
 st.markdown(
     """
 <style>
-html, body, [class*="css"] { font-size: 22px !important; }
-p, li, div, span { line-height: 1.85 !important; }
-.stChatMessage p { font-size: 22px !important; line-height: 1.85 !important; }
-.stTextInput input, .stTextArea textarea { font-size: 22px !important; line-height: 1.85 !important; }
-.stMarkdown { word-spacing: 0.10em !important; letter-spacing: 0.01em !important; }
+html, body, [class*="css"] { font-size: 12px !important; }
+p, li, div, span { line-height: 1.75 !important; }
+.stChatMessage p { font-size: 12px !important; line-height: 1.75 !important; }
+.stTextInput input, .stTextArea textarea { font-size: 12px !important; line-height: 1.75 !important; }
+.stMarkdown { word-spacing: 0.14em !important; letter-spacing: 0.02em !important; }
 
-/* Sade sayfa genişliği */
-.block-container { padding-top: 1.1rem; padding-bottom: 2.2rem; max-width: 980px; }
+/* Sayfa genişliği */
+.block-container { padding-top: 0.8rem; padding-bottom: 1.8rem; max-width: 1200px; }
 
 /* Kart */
 .card{
   border:1px solid rgba(0,0,0,.12);
-  border-radius:18px;
-  padding:14px 16px;
+  border-radius:16px;
+  padding:12px 14px;
   margin:10px 0;
-  background: rgba(255,255,255,.86);
+  background: rgba(255,255,255,.90);
 }
 .badge{
   display:inline-block;
-  padding:4px 10px;
+  padding:3px 9px;
   border-radius:999px;
   border:1px solid rgba(0,0,0,.12);
-  font-size:16px;
+  font-size:11px;
   opacity:.85;
   margin-bottom:8px;
 }
 
-/* Alt bar */
-.bottombar { margin-top: 10px; margin-bottom: 6px; }
-.stButton button{ border-radius:14px !important; padding:8px 12px !important; }
+/* Üst bar */
+.topbar{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  padding:10px 0 8px 0;
+}
+.leftbox{
+  width:220px;
+}
+.centerbox{
+  flex:1;
+  text-align:center;
+}
+.rightbox{
+  width:240px;
+  text-align:right;
+}
 
-/* Küçük ikon buton hissi */
-.smallhint { font-size: 14px; opacity: .7; }
+.titleBig{
+  font-size:26px;
+  font-weight:900;
+  line-height:1.2;
+}
+
+/* Alt giriş bar */
+.bottombar{
+  position: sticky;
+  bottom: 0;
+  background: rgba(255,255,255,0.92);
+  border-top: 1px solid rgba(0,0,0,0.08);
+  padding: 10px 0 6px 0;
+  backdrop-filter: blur(6px);
+}
+.stButton button{ border-radius:14px !important; padding:8px 12px !important; }
+.smallhint{ font-size: 11px; opacity: .7; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -143,7 +181,7 @@ def oturum_ozeti_yaz():
         st.error(f"Oturum özeti yazılırken hata: {e}")
 
 
-# ------------------ TTS (NOKTALAMA OKUMASIN) ------------------
+# ------------------ TTS ------------------
 def clean_for_tts(text: str) -> str:
     t = text
     t = re.sub(r"\*\*(.*?)\*\*", r"\1", t)
@@ -164,7 +202,7 @@ def tts_bytes(text: str) -> bytes:
     return mp3_fp.getvalue()
 
 
-# ------------------ MODEL: SUNUŞ + OKUDUĞUNU ANLAMA (ETİKETSİZ) ------------------
+# ------------------ MODEL (ETİKETSİZ, METİNDEN OKUMA) ------------------
 def system_prompt_json():
     return """
 Sen, özel öğrenme güçlüğü olan (ÖÖG) ortaokul öğrencisi için derste kullanılan yardımcı öğretim materyalisisin.
@@ -180,48 +218,24 @@ Hedefler:
 - Okuduğunu anlama becerisini güçlendirmek
 
 KURALLAR:
-- Öğrenciyi keşfe bırakma, rehberli ilerle.
-- Uzun paragraf verme.
-- Kısa cümle, basit kelime, madde madde.
-- Etiket kullanma: “ön düzenleyici, görsel benzetme” gibi akademik başlık yazma.
-- Başlıklar çocuk diliyle olsun.
-- Yazma yükünü azalt: A/B/C seçmeli sorular üret.
+- Uzun paragraf yok.
+- Kısa cümle, basit kelime.
+- Yazma yükünü azalt: A/B/C sorular.
 - Metin varsa mutlaka metne dayan.
-- Metni 2-4 kısa parçaya böl.
+- Akademik etiket yazma.
 
-ÇIKTI: SADECE JSON. Başka hiçbir şey yazma.
+ÇIKTI: SADECE JSON.
 
-JSON ŞEMASI:
+JSON:
 {
-  "acilis": "Bugün ne yapacağız? (1-2 cümle)",
+  "acilis": "1-2 cümle",
   "parcalar": [
-    {"metin":"kısa parça 1", "soru1":"Bu parçada kim/ne var?", "soru2":"Ne oldu?"},
-    {"metin":"kısa parça 2", "soru1":"...", "soru2":"..."}
+    {"metin":"kısa parça", "soru1":"kısa", "soru2":"kısa"}
   ],
-  "model": {
-    "metin":"kısa örnek parça",
-    "dusunce":["1 kısa adım","1 kısa adım","1 kısa adım"]
-  },
-  "ana_fikir": {
-    "soru":"Bu metnin ana fikri hangisi?",
-    "A":"...",
-    "B":"...",
-    "C":"...",
-    "dogru":"A"
-  },
-  "metin_sorusu": {
-    "soru":"Metne göre hangisi doğrudur?",
-    "A":"...",
-    "B":"...",
-    "C":"...",
-    "dogru":"B"
-  },
-  "kisa_tekrar": "1 cümle özet",
-  "kontrol": "1 kısa kontrol sorusu (Evet/Hayır ya da A/B)",
-  "geribildirim": {
-    "dogru":"1 cümle",
-    "yanlis":"1 cümle"
-  }
+  "ana_fikir": {"soru":"...", "A":"...", "B":"...", "C":"...", "dogru":"A"},
+  "metin_sorusu": {"soru":"...", "A":"...", "B":"...", "C":"...", "dogru":"B"},
+  "kisa_tekrar":"1 cümle",
+  "geribildirim":{"dogru":"1 cümle","yanlis":"1 cümle"}
 }
 """
 
@@ -241,7 +255,7 @@ def ask_model(lesson_goal: str, source_text: str) -> dict:
     prompt = (
         f"HEDEF: {lesson_goal}\n\n"
         f"KAYNAK METİN:\n{source_text}\n\n"
-        "Not: Metni parça parça ver. Sorular çok kısa olsun."
+        "Metni 2-4 parçaya böl. Parça soruları çok kısa olsun."
     )
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
@@ -252,17 +266,13 @@ def ask_model(lesson_goal: str, source_text: str) -> dict:
     )
     d = safe_json_load(resp.choices[0].message.content)
 
-    # Eksikleri doldur
-    d.setdefault("acilis", "Bugün metinden ana fikri bulacağız.")
+    d.setdefault("acilis", "Bugün metni birlikte okuyacağız ve ana fikri bulacağız.")
     d.setdefault("parcalar", [])
-    d.setdefault("model", {"metin": "", "dusunce": []})
-    d.setdefault("ana_fikir", {"soru": "", "A": "", "B": "", "C": "", "dogru": "A"})
-    d.setdefault("metin_sorusu", {"soru": "", "A": "", "B": "", "C": "", "dogru": "A"})
+    d.setdefault("ana_fikir", {"soru": "Ana fikir hangisi?", "A": "", "B": "", "C": "", "dogru": "A"})
+    d.setdefault("metin_sorusu", {"soru": "Metne göre hangisi doğru?", "A": "", "B": "", "C": "", "dogru": "A"})
     d.setdefault("kisa_tekrar", "Kısaca: Ana fikir metnin en önemli mesajıdır.")
-    d.setdefault("kontrol", "Ana fikir tek cümle olur mu? (Evet/Hayır)")
-    d.setdefault("geribildirim", {"dogru": "Harika! Çünkü metnin tamamını kapsıyor.", "yanlis": "Sorun değil. Metnin tamamını kapsayanı seç."})
+    d.setdefault("geribildirim", {"dogru": "Harika! Metnin tamamını kapsıyor.", "yanlis": "Sorun değil. Metnin tamamını kapsayanı seç."})
 
-    # Parça sayısını sınırla
     if isinstance(d.get("parcalar"), list):
         d["parcalar"] = d["parcalar"][:4]
     else:
@@ -289,121 +299,67 @@ def build_source_text(pdf_text: str, extra_text: str) -> str:
         src += pdf_text.strip() + "\n"
     if extra_text.strip():
         src += extra_text.strip() + "\n"
-    src = src.strip()
-    return src
+    return src.strip()
 
 
-def show_step(d: dict, step: int):
-    parcalar = d.get("parcalar", [])
+def show_lesson(d: dict):
+    # Etiketsiz, sade görünüm
+    make_card("Başlayalım", d.get("acilis", ""))
 
-    # 1) Açılış + Parça 1
-    if step == 1:
-        make_card("Hadi başlayalım", d.get("acilis", ""))
-        if parcalar:
-            p = parcalar[0]
-            make_card(
-                "Oku",
-                f"{p.get('metin','')}<br><br>• {p.get('soru1','')}<br>• {p.get('soru2','')}",
-            )
-        return
-
-    # 2-4) Diğer parçalar
-    if 2 <= step <= 4:
-        idx = step - 1
-        if idx < len(parcalar):
-            p = parcalar[idx]
-            make_card(
-                "Oku",
-                f"{p.get('metin','')}<br><br>• {p.get('soru1','')}<br>• {p.get('soru2','')}",
-            )
-        else:
-            make_card("Devam", "Bir sonraki adıma geçelim.")
-        return
-
-    # 5) Model
-    if step == 5:
-        m = d.get("model", {})
-        metin = m.get("metin", "")
-        steps = (m.get("dusunce") or [])[:3]
-        body = metin if metin else "Kısa bir örnek düşünelim."
-        if steps:
-            body += "<br><br>" + "<br>".join([f"• {s}" for s in steps])
-        make_card("Ben bir örnek yapayım", body)
-        return
-
-    # 6) Ana fikir A/B/C
-    if step == 6:
-        af = d.get("ana_fikir", {})
-        body = (
-            f"<b>{af.get('soru','')}</b><br><br>"
-            f"A) {af.get('A','')}<br>"
-            f"B) {af.get('B','')}<br>"
-            f"C) {af.get('C','')}"
+    for i, p in enumerate(d.get("parcalar", []), start=1):
+        make_card(
+            f"Okuma parçası {i}",
+            f"{p.get('metin','')}<br><br>• {p.get('soru1','')}<br>• {p.get('soru2','')}",
         )
-        make_card("Şimdi sen seç", body)
-        return
 
-    # 7) Metin sorusu A/B/C
-    if step == 7:
-        ms = d.get("metin_sorusu", {})
-        body = (
-            f"<b>{ms.get('soru','')}</b><br><br>"
-            f"A) {ms.get('A','')}<br>"
-            f"B) {ms.get('B','')}<br>"
-            f"C) {ms.get('C','')}"
-        )
-        make_card("Bir soru daha", body)
-        return
+    af = d.get("ana_fikir", {})
+    make_card(
+        "Ana fikir seç",
+        f"<b>{af.get('soru','')}</b><br><br>"
+        f"A) {af.get('A','')}<br>"
+        f"B) {af.get('B','')}<br>"
+        f"C) {af.get('C','')}",
+    )
 
-    # 8) Tekrar + kontrol
-    if step == 8:
-        make_card("Kısaca", d.get("kisa_tekrar", ""))
-        make_card("Kontrol", d.get("kontrol", ""))
-        return
+    ms = d.get("metin_sorusu", {})
+    make_card(
+        "Metinden soru",
+        f"<b>{ms.get('soru','')}</b><br><br>"
+        f"A) {ms.get('A','')}<br>"
+        f"B) {ms.get('B','')}<br>"
+        f"C) {ms.get('C','')}",
+    )
 
-
-def lesson_to_text_for_tts(d: dict) -> str:
-    # Dinleme için sade özet (noktalama zaten temizleniyor)
-    parts = [d.get("acilis", "")]
-    for p in d.get("parcalar", [])[:2]:
-        parts.append(p.get("metin", ""))
-    parts.append(d.get("kisa_tekrar", ""))
-    return " ".join([x for x in parts if x]).strip()
+    make_card("Kısa tekrar", d.get("kisa_tekrar", ""))
 
 
 def start_lesson(lesson_goal: str, pdf_text: str, extra_text: str):
     source_text = build_source_text(pdf_text, extra_text)
     if not source_text:
-        source_text = "Metin yok. Konuyu kısa bir metin gibi anlat ve ana fikir çalışması yaptır."
+        source_text = "Metin yok. Kısa bir metin uydurarak ana fikir çalışması yaptır."
 
-    # log user
-    with st.chat_message("user"):
-        st.write(lesson_goal)
+    # user message
     st.session_state.messages.append({"role": "user", "content": lesson_goal})
     st.session_state.user_texts.append(lesson_goal)
     log_message(st.session_state.user, "user", lesson_goal)
 
-    # generate lesson
-    with st.chat_message("assistant"):
-        d = ask_model(lesson_goal, source_text)
-        st.session_state.last_lesson = d
-        st.session_state.step = 1
-        show_step(d, 1)
+    # assistant produce
+    d = ask_model(lesson_goal, source_text)
+    st.session_state.last_lesson = d
 
-        # Dinleme metni ve kayıt
-        st.session_state.last_assistant_text = lesson_to_text_for_tts(d)
+    # dinleme metni
+    listen_text = d.get("acilis", "") + " " + d.get("kisa_tekrar", "")
+    st.session_state.last_assistant_text = listen_text.strip()
 
-        # history/sheets için (kısa)
-        history_text = f"{d.get('acilis','')}\n{d.get('kisa_tekrar','')}\n"
-        st.session_state.messages.append({"role": "assistant", "content": history_text})
-        log_message(st.session_state.user, "assistant", history_text)
+    # history log (kısa)
+    st.session_state.messages.append({"role": "assistant", "content": d.get("kisa_tekrar", "")})
+    log_message(st.session_state.user, "assistant", d.get("kisa_tekrar", ""))
 
 
 # =========================================================
-#  1) GİRİŞ EKRANI — İSTEDİĞİN TASARIM
+# 1) GİRİŞ EKRANI (dış kısım süper dediğin ekran)
 # =========================================================
 if "user" not in st.session_state:
-    # Ortada büyük başlık
     st.markdown(
         """
         <div style="text-align:center; margin-top:40px; margin-bottom:10px;">
@@ -413,7 +369,6 @@ if "user" not in st.session_state:
         unsafe_allow_html=True,
     )
 
-    # Alt solda hoş geldiniz
     st.markdown(
         """
         <div style="display:flex; align-items:center; gap:10px; margin-top:22px; margin-bottom:8px;">
@@ -426,7 +381,6 @@ if "user" not in st.session_state:
 
     isim = st.text_input("Adını yaz", placeholder="Örn: Ali")
 
-    # En son giriş butonu
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         giris = st.button("Giriş Yap", use_container_width=True)
@@ -434,19 +388,15 @@ if "user" not in st.session_state:
     if giris and isim.strip():
         isim = isim.strip()
         st.session_state.user = isim
-
-        # state init
         st.session_state.messages = load_history(isim)
         st.session_state.user_texts = []
         st.session_state.start_time = datetime.now(ZoneInfo("Europe/Istanbul"))
         st.session_state.last_audio_len = 0
         st.session_state.last_assistant_text = ""
         st.session_state.last_lesson = None
-        st.session_state.step = 0
-
+        st.session_state.draft = ""
         st.rerun()
 
-    # En altta kullanım alanı
     st.markdown("---")
     with st.expander("❓ Chatbot nasıl kullanılır?", expanded=False):
         st.markdown(
@@ -465,92 +415,102 @@ if "user" not in st.session_state:
 - Okuduğunu anlama güçlenir.
 
 **İpucu**
-- Yazmak zor gelirse 🎤 ile sesle sor.
+- 🎤 ile sesle sor.
 - 🔊 ile dinle.
 """
         )
-
     st.stop()
 
+
 # =========================================================
-#  2) ANA EKRAN — SADE DERS AKIŞI
+# 2) GİRİŞ SONRASI ANA EKRAN (İSTEDİĞİN DİZAYN)
 # =========================================================
 
-# Üst bar: küçük başlık + çıkış
-top1, top2 = st.columns([3, 1])
-with top1:
-    st.markdown("### 📚 Okuma Dostum")
-    st.caption(f"👤 {st.session_state.user}")
-with top2:
-    if st.button("Çıkış", use_container_width=True):
+# --- ÜST BAR: sol (kitap+isim), orta (başlık), sağ (çıkış paneli) ---
+st.markdown(
+    f"""
+<div class="topbar">
+  <div class="leftbox">
+    <div style="font-size:26px;">📚</div>
+    <div style="margin-top:4px; font-weight:800;">{st.session_state.user}</div>
+  </div>
+  <div class="centerbox">
+    <div class="titleBig">Okuma Dostum</div>
+  </div>
+  <div class="rightbox">
+    <div style="font-weight:800; margin-bottom:6px;">Çıkış Paneli</div>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+# Sağ taraftaki çıkış butonu (kolonla gerçek buton)
+top_left, top_mid, top_right = st.columns([1, 4, 1])
+with top_right:
+    if st.button("Çıkış Yap", use_container_width=True):
         oturum_ozeti_yaz()
         st.session_state.clear()
         st.rerun()
 
-# Öğretmen: metin ekleme (çok sade)
-with st.expander("📄 Öğretmen: Metni ekle (PDF / Yapıştır)", expanded=False):
-    c1, c2 = st.columns(2)
-    pdf_text = ""
-    extra_text = ""
-    with c1:
-        pdf_file = st.file_uploader("PDF seç", type="pdf")
+# --- SOL PANEL (açılır): PDF yükle / Metin yapıştır ---
+with st.sidebar:
+    st.markdown("### 📌 Panel")
+    with st.expander("📄 PDF Yükle", expanded=False):
+        st.session_state.pdf_text = ""
+        pdf_file = st.file_uploader("PDF seç", type="pdf", key="pdf_uploader")
         if pdf_file is not None:
-            reader = PdfReader(pdf_file)
-            for page in reader.pages:
-                txt = page.extract_text()
-                if txt:
-                    pdf_text += txt + "\n"
-    with c2:
-        extra_text = st.text_area("Metni buraya yapıştır", height=170)
+            try:
+                reader = PdfReader(pdf_file)
+                pdf_text = ""
+                for page in reader.pages:
+                    txt = page.extract_text()
+                    if txt:
+                        pdf_text += txt + "\n"
+                st.session_state.pdf_text = pdf_text.strip()
+                st.success("PDF yüklendi ✔️")
+            except Exception as e:
+                st.error(f"PDF okunamadı: {e}")
 
-pdf_text = locals().get("pdf_text", "")
-extra_text = locals().get("extra_text", "")
+    with st.expander("📝 Metin Yapıştır", expanded=False):
+        st.session_state.extra_text = st.text_area(
+            "Metni buraya yapıştır",
+            height=220,
+            key="extra_text_area",
+        )
 
-# Sohbet geçmişi
+# güvenli varsayılanlar
+pdf_text = st.session_state.get("pdf_text", "")
+extra_text = st.session_state.get("extra_text", "")
+
+# --- SOHBET ALANI ---
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.write(m["content"])
 
-# Ders akışı (tek buton: Devam)
-d = st.session_state.get("last_lesson")
-if d and st.session_state.step > 0:
-    st.markdown("### ✅ Ders")
-    show_step(d, st.session_state.step)
+# Ders üretildiyse, göster
+if st.session_state.get("last_lesson"):
+    with st.chat_message("assistant"):
+        show_lesson(st.session_state.last_lesson)
 
-    # A/B/C etkileşimleri
-    if st.session_state.step == 6:
-        af = d.get("ana_fikir", {})
-        choice = st.radio("Seç:", ["A", "B", "C"], horizontal=True, index=0, key="choice_af")
-        if st.button("Kontrol et", use_container_width=True):
-            if choice == af.get("dogru", "A"):
-                make_card("✅", d.get("geribildirim", {}).get("dogru", "Harika!"))
-            else:
-                make_card("🟡", d.get("geribildirim", {}).get("yanlis", "Sorun değil."))
-
-    if st.session_state.step == 7:
-        ms = d.get("metin_sorusu", {})
-        choice2 = st.radio("Seç:", ["A", "B", "C"], horizontal=True, index=0, key="choice_ms")
-        if st.button("Kontrol et", use_container_width=True):
-            if choice2 == ms.get("dogru", "A"):
-                make_card("✅", d.get("geribildirim", {}).get("dogru", "Harika!"))
-            else:
-                make_card("🟡", d.get("geribildirim", {}).get("yanlis", "Sorun değil."))
-
-    col_next, col_restart = st.columns([2, 1])
-    with col_next:
-        if st.button("➡️ Devam", use_container_width=True):
-            st.session_state.step = min(st.session_state.step + 1, 8)
-            st.rerun()
-    with col_restart:
-        if st.button("🔄 Baştan", use_container_width=True):
-            st.session_state.step = 1
-            st.rerun()
-
-# ------------------ ALT BAR: 🎤 + 🔊 + 🆘 (CHAT YANINA YAKIN) ------------------
+# =========================================================
+# ALT GİRİŞ ÇUBUĞU: [Mesaj] + 🎤 + 🔊 (SOHBET ÇUBUĞUNUN BİTİŞİNDE)
+# Streamlit chat_input yanına buton koymak zor olduğu için
+# burada text_input ile "sohbet çubuğu" görünümü kuruyoruz.
+# =========================================================
 st.markdown('<div class="bottombar"></div>', unsafe_allow_html=True)
-c_mic, c_listen, c_help = st.columns([1, 1, 1])
 
-# 🎤 Mikrofon: küçük emoji buton
+c_msg, c_mic, c_listen, c_send = st.columns([7, 1, 1, 1])
+
+with c_msg:
+    st.session_state.draft = st.text_input(
+        "Mesaj",
+        value=st.session_state.get("draft", ""),
+        placeholder="Sorunu yaz (ör: Bu metnin ana fikrini bulalım)",
+        label_visibility="collapsed",
+        key="draft_input",
+    )
+
 with c_mic:
     try:
         with st.popover("🎤", use_container_width=True):
@@ -565,72 +525,49 @@ with c_mic:
                 last_len = st.session_state.get("last_audio_len", 0)
                 if len(audio_bytes) != last_len:
                     st.session_state["last_audio_len"] = len(audio_bytes)
-                    st.success("✔️")
-
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
                         tmp.write(audio_bytes)
                         tmp_path = tmp.name
-
-                    with open(tmp_path, "rb") as f:
-                        transcript = client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=f,
-                            language="tr",
-                        )
-                    mic_text = transcript.text
-                    st.info(mic_text)
-
-                    start_lesson(mic_text, pdf_text, extra_text)
+                    try:
+                        with open(tmp_path, "rb") as f:
+                            transcript = client.audio.transcriptions.create(
+                                model="whisper-1",
+                                file=f,
+                                language="tr",
+                            )
+                        mic_text = transcript.text.strip()
+                        if mic_text:
+                            # kullanıcı mesajı gibi işle
+                            with st.chat_message("user"):
+                                st.write(mic_text)
+                            start_lesson(mic_text, pdf_text, extra_text)
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Ses yazıya çevrilemedi: {e}")
     except Exception:
+        # popover yoksa küçük expander
         with st.expander("🎤", expanded=False):
             audio_bytes = audio_recorder(
                 text="Konuş",
                 pause_threshold=1.8,
                 sample_rate=16000,
-                key="mic_main_fallback",
+                key="mic_fallback",
             )
-            if audio_bytes:
-                last_len = st.session_state.get("last_audio_len", 0)
-                if len(audio_bytes) != last_len:
-                    st.session_state["last_audio_len"] = len(audio_bytes)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                        tmp.write(audio_bytes)
-                        tmp_path = tmp.name
-                    with open(tmp_path, "rb") as f:
-                        transcript = client.audio.transcriptions.create(
-                            model="whisper-1",
-                            file=f,
-                            language="tr",
-                        )
-                    start_lesson(transcript.text, pdf_text, extra_text)
 
-# 🔊 Dinle
 with c_listen:
     if st.button("🔊", use_container_width=True):
         t = st.session_state.get("last_assistant_text", "")
         if t.strip():
             st.audio(tts_bytes(t), format="audio/mp3")
         else:
-            st.warning("Önce bir ders başlatalım 😊")
+            st.warning("Dinlenecek bir şey yok.")
 
-# 🆘 Yardım altta
-with c_help:
-    try:
-        with st.popover("🆘", use_container_width=True):
-            st.markdown("### Sıkça Sorulan Sorular")
-            st.markdown("**1) Ne yapacağız?**\n- Metni birlikte okuyup ana fikri bulacağız.")
-            st.markdown("**2) Yazmak zor gelirse?**\n- 🎤 ile sorabilirsin.")
-            st.markdown("**3) Dinlemek?**\n- 🔊 tuşuna bas.")
-            st.markdown("**4) PDF yoksa?**\n- Yine çalışır ama metin eklemek daha iyi.")
-    except Exception:
-        with st.expander("🆘", expanded=False):
-            st.markdown("### Sıkça Sorulan Sorular")
-            st.markdown("**1) Ne yapacağız?**\n- Metni birlikte okuyup ana fikri bulacağız.")
-            st.markdown("**2) Yazmak zor gelirse?**\n- 🎤 ile sorabilirsin.")
-            st.markdown("**3) Dinlemek?**\n- 🔊 tuşuna bas.")
-            st.markdown("**4) PDF yoksa?**\n- Yine çalışır ama metin eklemek daha iyi.")
-
-# ------------------ CHAT INPUT (EN ALT) ------------------
-soru = st.chat_input("Sorunu yaz (ör: Bu metnin ana fikrini bulalım)")
-if soru:
-    start_lesson(soru, pdf_text, extra_text)
+with c_send:
+    if st.button("Gönder", use_container_width=True):
+        msg = st.session_state.get("draft_input", "").strip()
+        if msg:
+            with st.chat_message("user"):
+                st.write(msg)
+            start_lesson(msg, pdf_text, extra_text)
+            st.session_state.draft = ""
+            st.rerun()
