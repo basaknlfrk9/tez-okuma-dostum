@@ -14,27 +14,33 @@ from gtts import gTTS
 from io import BytesIO
 import json
 
+# =========================================================
+#  OKUMA DOSTUM — ÖÖG + SUNUŞ YOLUYLA ÖĞRETİM (DERS SENARYOSU)
+#  Öğretmen metin/PDF verir → öğrenci chatbotla okur → ana fikir/tema → sorular
+#  Tasarım: sade, büyük punto, az buton, etiket yok.
+# =========================================================
+
 # ------------------ SAYFA AYARI ------------------
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 st.title("📚 Okuma Dostum")
 
-# ------------------ ÖÖG DOSTU CSS (BÜYÜK PUNTO + BOŞLUK) ------------------
+# ------------------ ÖÖG DOSTU CSS ------------------
 st.markdown(
     """
 <style>
 html, body, [class*="css"] { font-size: 22px !important; }
-p, li, div, span { line-height: 1.8 !important; }
-.stChatMessage p { font-size: 22px !important; line-height: 1.8 !important; }
-.stTextInput input, .stTextArea textarea { font-size: 22px !important; line-height: 1.8 !important; }
+p, li, div, span { line-height: 1.85 !important; }
+.stChatMessage p { font-size: 22px !important; line-height: 1.85 !important; }
+.stTextInput input, .stTextArea textarea { font-size: 22px !important; line-height: 1.85 !important; }
 .stMarkdown { word-spacing: 0.10em !important; letter-spacing: 0.01em !important; }
 
 /* Kart */
 .card{
   border:1px solid rgba(0,0,0,.12);
-  border-radius:16px;
+  border-radius:18px;
   padding:14px 16px;
   margin:10px 0;
-  background: rgba(255,255,255,.80);
+  background: rgba(255,255,255,.86);
 }
 .badge{
   display:inline-block;
@@ -46,20 +52,18 @@ p, li, div, span { line-height: 1.8 !important; }
   margin-bottom:8px;
 }
 
-/* Alt bar (mikrofon + yardım + dinle) gibi dursun diye daha sıkı */
-.bottombar { margin-top: 10px; margin-bottom: 6px; }
-
-/* Butonların fazla büyümemesi */
-.stButton button{ border-radius:14px !important; padding:8px 12px !important; }
-
-/* Sayfayı ferah yap */
+/* Sade sayfa genişliği */
 .block-container { padding-top: 1.1rem; padding-bottom: 2.2rem; max-width: 980px; }
+
+/* Alt bar */
+.bottombar { margin-top: 10px; margin-bottom: 6px; }
+.stButton button{ border-radius:14px !important; padding:8px 12px !important; }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
-# ------------------ OPENAI ------------------
+# ------------------ OPENAI CLIENT ------------------
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # ------------------ GOOGLE SHEETS ------------------
@@ -75,8 +79,9 @@ stats_sheet = workbook.sheet1
 try:
     chat_sheet = workbook.worksheet("Sohbet")
 except WorksheetNotFound:
-    chat_sheet = workbook.add_worksheet(title="Sohbet", rows=1000, cols=4)
+    chat_sheet = workbook.add_worksheet(title="Sohbet", rows=2000, cols=4)
     chat_sheet.append_row(["Kullanici", "Zaman", "Rol", "Mesaj"])
+
 
 # ------------------ SHEETS UTIL ------------------
 def log_message(user, role, content):
@@ -85,6 +90,7 @@ def log_message(user, role, content):
         chat_sheet.append_row([user, now_tr, role, content])
     except Exception as e:
         st.error(f"Sohbet kaydedilirken hata: {e}")
+
 
 def load_history(user):
     messages = []
@@ -99,6 +105,7 @@ def load_history(user):
     except Exception as e:
         st.error(f"Sohbet geçmişi yüklenemedi: {e}")
     return messages
+
 
 def kelime_istatistikleri(metinler):
     if not metinler:
@@ -118,6 +125,7 @@ def kelime_istatistikleri(metinler):
     top5 = ", ".join([f"{w} ({c})" for w, c in counts.most_common(5)])
     return en_cok, top5
 
+
 def oturum_ozeti_yaz():
     if "user" not in st.session_state or "start_time" not in st.session_state:
         return
@@ -132,14 +140,16 @@ def oturum_ozeti_yaz():
     except Exception as e:
         st.error(f"Oturum özeti yazılırken hata: {e}")
 
+
 # ------------------ TTS (NOKTALAMA OKUMASIN) ------------------
 def clean_for_tts(text: str) -> str:
     t = text
-    t = re.sub(r"\*\*(.*?)\*\*", r"\1", t)  # markdown bold
+    t = re.sub(r"\*\*(.*?)\*\*", r"\1", t)
     t = re.sub(r"[#>\[\]\(\)\{\}_`~^=|\\/@]", " ", t)
-    t = re.sub(r"[:;,.!?…“”\"'’\-–—]", " ", t)  # noktalama
+    t = re.sub(r"[:;,.!?…“”\"'’\-–—]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     return t
+
 
 def tts_bytes(text: str) -> bytes:
     safe = clean_for_tts(text)
@@ -151,37 +161,67 @@ def tts_bytes(text: str) -> bytes:
     gTTS(safe, lang="tr").write_to_fp(mp3_fp)
     return mp3_fp.getvalue()
 
-# ------------------ SUNUŞ YOLUYLA ÖĞRETİM (ÇOCUK DİLİ, ETİKET YOK) ------------------
+
+# ------------------ MODEL: SUNUŞ YOLUYLA + OKUDUĞUNU ANLAMA (ETİKETSİZ) ------------------
 def system_prompt_json():
     return """
-Sen, özel öğrenme güçlüğü olan ortaokul öğrencisi için derste yardımcı materyal olan bir öğretim chatbotusun.
+Sen, özel öğrenme güçlüğü olan (ÖÖG) ortaokul öğrencisi için derste kullanılan yardımcı öğretim materyalisisin.
 Öğretim stratejin: SUNUŞ YOLUYLA ÖĞRETİM (Ausubel).
 
-KURAL:
-- Öğrenciyi keşfe bırakma.
-- Uzun paragraf yok.
-- Basit kelime.
-- Kısa cümle.
-- Öğrenci yazmakta zorlanabilir: seçenekli sorular kullan.
+DERS SENARYOSU:
+Öğretmen bir METİN/PDF verir.
+Öğrenci bu metni seninle okur.
+Hedefler:
+- Metni parça parça okumak ve anlamak
+- Ana fikir / ana tema bulmak
+- Metinden soruları cevaplamak
+- Okuduğunu anlama becerisini güçlendirmek
+
+KURALLAR:
+- Öğrenciyi keşfe bırakma, rehberli ilerle.
+- Uzun paragraf verme.
+- Kısa cümle, basit kelime, madde madde.
+- Etiket kullanma: “ön düzenleyici, görsel benzetme” gibi akademik başlık yazma.
+- Başlıklar çocuk diliyle olsun.
+- Yazma yükünü azalt: A/B/C seçmeli sorular üret.
+- Metin varsa mutlaka metne dayan.
 
 ÇIKTI: SADECE JSON. Başka hiçbir şey yazma.
 
-ÖNEMLİ:
-- Basamak isimlerini akademik yazma.
-- "görsel benzetme" gibi terimler yazma.
-- Basamak başlıkları çocuk diliyle olsun.
-
 JSON ŞEMASI:
 {
-  "adim1": {"baslik": "1) Başla", "metin": "Dikkat çeken 1-2 cümle"},
-  "adim2": {"baslik": "2) Kısa anlat", "maddeler": ["madde1","madde2","madde3"]},
-  "adim3": {"baslik": "3) Örnek göster", "adimlar": ["adım1","adım2"]},
-  "adim4": {"baslik": "4) Sen dene", "soru": "A/B/C seçmeli soru", "A": "A", "B": "B", "C": "C", "dogru": "A"},
-  "adim5": {"baslik": "5) Tekrar", "metin": "1 cümle özet"},
-  "adim6": {"baslik": "6) Kontrol", "soru": "1 kısa kontrol sorusu"},
-  "geribildirim": {"dogru": "1 cümle", "yanlis": "1 cümle"}
+  "acilis": "Bugün ne yapacağız? (1-2 cümle)",
+  "parcalar": [
+    {"metin":"kısa parça 1", "soru1":"Bu parçada kim/ne var?", "soru2":"Ne oldu?"},
+    {"metin":"kısa parça 2", "soru1":"...", "soru2":"..."}
+  ],
+  "model": {
+    "metin":"kısa örnek parça",
+    "dusunce":["1 kısa adım","1 kısa adım","1 kısa adım"]
+  },
+  "ana_fikir": {
+    "soru":"Bu metnin ana fikri hangisi?",
+    "A":"...",
+    "B":"...",
+    "C":"...",
+    "dogru":"A"
+  },
+  "metin_sorusu": {
+    "soru":"Metne göre hangisi doğrudur?",
+    "A":"...",
+    "B":"...",
+    "C":"...",
+    "dogru":"B"
+  },
+  "kisa_tekrar": "1 cümle özet",
+  "kontrol": "1 kısa kontrol sorusu (Evet/Hayır ya da A/B)",
+  "geribildirim": {
+    "dogru":"1 cümle",
+    "yanlis":"1 cümle"
+  }
 }
 """
+
 
 def safe_json_load(raw: str) -> dict:
     raw = (raw or "").strip()
@@ -193,6 +233,44 @@ def safe_json_load(raw: str) -> dict:
             return json.loads(m.group(0))
         return {}
 
+
+def ask_model(user_question: str, source_text: str) -> dict:
+    prompt = (
+        f"SORU / HEDEF: {user_question}\n\n"
+        f"KAYNAK METİN:\n{source_text}\n\n"
+        "Not: Metni parça parça ver. Sorular kısa olsun."
+    )
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": system_prompt_json()},
+            {"role": "user", "content": prompt},
+        ],
+    )
+
+    d = safe_json_load(resp.choices[0].message.content)
+
+    # Eksikleri doldur
+    d.setdefault("acilis", "Bugün metinden ana fikri bulacağız.")
+    d.setdefault("parcalar", [])
+    d.setdefault("model", {"metin": "", "dusunce": []})
+    d.setdefault("ana_fikir", {"soru": "", "A": "", "B": "", "C": "", "dogru": "A"})
+    d.setdefault("metin_sorusu", {"soru": "", "A": "", "B": "", "C": "", "dogru": "A"})
+    d.setdefault("kisa_tekrar", "Kısaca: Ana fikir metnin en önemli mesajıdır.")
+    d.setdefault("kontrol", "Ana fikir tek cümle olur mu? (Evet/Hayır)")
+    d.setdefault("geribildirim", {"dogru": "Harika! Doğru seçtin.", "yanlis": "Sorun değil. Metnin tamamını kapsayanı seç."})
+
+    # Parça sayısını sınırla (ekranı yormasın)
+    if isinstance(d.get("parcalar"), list):
+        d["parcalar"] = d["parcalar"][:4]
+    else:
+        d["parcalar"] = []
+
+    return d
+
+
+# ------------------ UI HELPERS ------------------
 def make_card(title, body_html):
     st.markdown(
         f"""
@@ -204,113 +282,159 @@ def make_card(title, body_html):
         unsafe_allow_html=True,
     )
 
+
 def format_for_history(d: dict) -> str:
-    # Kaydetmek için sade metin
+    # Kayda gitsin diye sade metin
     out = []
-    for key in ["adim1","adim2","adim3","adim4","adim5","adim6"]:
-        a = d.get(key, {})
-        if not a:
-            continue
-        baslik = a.get("baslik", key)
-        out.append(baslik)
-        if "metin" in a and a["metin"]:
-            out.append(a["metin"])
-        if "maddeler" in a and a["maddeler"]:
-            out.extend([f"- {x}" for x in a["maddeler"]])
-        if "adimlar" in a and a["adimlar"]:
-            out.extend([f"{i+1}) {x}" for i, x in enumerate(a["adimlar"])])
-        if key == "adim4":
-            out.append(a.get("soru",""))
-            out.append(f"A) {a.get('A','')}")
-            out.append(f"B) {a.get('B','')}")
-            out.append(f"C) {a.get('C','')}")
+    out.append(d.get("acilis", ""))
+
+    for i, p in enumerate(d.get("parcalar", []), start=1):
+        out.append(f"Parça {i}: {p.get('metin','')}")
+        out.append(f"- {p.get('soru1','')}")
+        out.append(f"- {p.get('soru2','')}")
+
+    m = d.get("model", {})
+    if m.get("metin"):
+        out.append("Örnek:")
+        out.append(m.get("metin", ""))
+        for step in (m.get("dusunce") or [])[:3]:
+            out.append(f"- {step}")
+
+    af = d.get("ana_fikir", {})
+    out.append(af.get("soru", ""))
+    out.append(f"A) {af.get('A','')}")
+    out.append(f"B) {af.get('B','')}")
+    out.append(f"C) {af.get('C','')}")
+
+    ms = d.get("metin_sorusu", {})
+    out.append(ms.get("soru", ""))
+    out.append(f"A) {ms.get('A','')}")
+    out.append(f"B) {ms.get('B','')}")
+    out.append(f"C) {ms.get('C','')}")
+
+    out.append(d.get("kisa_tekrar", ""))
+    out.append(d.get("kontrol", ""))
+
     return "\n".join([x for x in out if x])
 
-def ask_model(user_question: str, pdf_text: str, extra_text: str) -> dict:
-    # PDF/metin varsa "metinden öğretim" gibi kullan
-    content = ""
-    if pdf_text:
-        content += "PDF:\n" + pdf_text[:900] + "\n\n"
-    if extra_text:
-        content += "Metin:\n" + extra_text[:900] + "\n\n"
 
-    prompt = f"SORU/KONU: {user_question}\n\n"
-    if content:
-        prompt += "KAYNAK METİN VAR. Bu metne dayanarak anlat.\n\n" + content
-    else:
-        prompt += "KAYNAK METİN YOK. Konuyu anlat.\n"
+def show_step(d: dict, step: int):
+    # step 1: açılış + parça 1
+    # step 2..: diğer parçalar
+    # model
+    # ana fikir
+    # metin sorusu
+    # tekrar + kontrol
 
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt_json()},
-            {"role": "user", "content": prompt},
-        ],
-    )
-    d = safe_json_load(resp.choices[0].message.content)
+    parcalar = d.get("parcalar", [])
 
-    # Eksikleri doldur
-    d.setdefault("adim1", {"baslik":"1) Başla","metin":"Hazır mısın?"})
-    d.setdefault("adim2", {"baslik":"2) Kısa anlat","maddeler":[]})
-    d.setdefault("adim3", {"baslik":"3) Örnek göster","adimlar":[]})
-    d.setdefault("adim4", {"baslik":"4) Sen dene","soru":"","A":"","B":"","C":"","dogru":"A"})
-    d.setdefault("adim5", {"baslik":"5) Tekrar","metin":""})
-    d.setdefault("adim6", {"baslik":"6) Kontrol","soru":""})
-    d.setdefault("geribildirim", {"dogru":"Aferin! Doğru seçtin.","yanlis":"Sorun değil. İpucuna bakalım."})
-    return d
+    if step == 1:
+        make_card("Hadi başlayalım", d.get("acilis", ""))
+        if parcalar:
+            p = parcalar[0]
+            make_card(
+                "Oku",
+                f"{p.get('metin','')}<br><br>• {p.get('soru1','')}<br>• {p.get('soru2','')}",
+            )
+        return
 
-def show_steps(d: dict, reveal: int):
-    # 1-6 adımı sırayla göster
-    if reveal >= 1:
-        a = d["adim1"]
-        make_card(a.get("baslik","1) Başla"), a.get("metin",""))
-    if reveal >= 2:
-        a = d["adim2"]
-        maddeler = a.get("maddeler", [])[:5]
-        body = "<br>".join([f"• {m}" for m in maddeler]) if maddeler else "• (Kısa bilgi)"
-        make_card(a.get("baslik","2) Kısa anlat"), body)
-    if reveal >= 3:
-        a = d["adim3"]
-        adimlar = a.get("adimlar", [])[:3]
-        body = "<br>".join([f"{i+1}) {x}" for i, x in enumerate(adimlar)]) if adimlar else "1) (Örnek)"
-        make_card(a.get("baslik","3) Örnek göster"), body)
-    if reveal >= 4:
-        a = d["adim4"]
+    # parçalar 2-4
+    if 2 <= step <= 4:
+        idx = step - 1
+        if idx < len(parcalar):
+            p = parcalar[idx]
+            make_card(
+                "Oku",
+                f"{p.get('metin','')}<br><br>• {p.get('soru1','')}<br>• {p.get('soru2','')}",
+            )
+        else:
+            make_card("Devam", "Bir sonraki adıma geçelim.")
+        return
+
+    # model
+    if step == 5:
+        m = d.get("model", {})
+        metin = m.get("metin", "")
+        steps = (m.get("dusunce") or [])[:3]
+        body = metin if metin else "Kısa bir örnek düşünelim."
+        if steps:
+            body += "<br><br>" + "<br>".join([f"• {s}" for s in steps])
+        make_card("Ben bir örnek yapayım", body)
+        return
+
+    # ana fikir sorusu
+    if step == 6:
+        af = d.get("ana_fikir", {})
         body = (
-            f"<b>{a.get('soru','')}</b><br><br>"
-            f"A) {a.get('A','')}<br>"
-            f"B) {a.get('B','')}<br>"
-            f"C) {a.get('C','')}"
+            f"<b>{af.get('soru','')}</b><br><br>"
+            f"A) {af.get('A','')}<br>"
+            f"B) {af.get('B','')}<br>"
+            f"C) {af.get('C','')}"
         )
-        make_card(a.get("baslik","4) Sen dene"), body)
-    if reveal >= 5:
-        a = d["adim5"]
-        make_card(a.get("baslik","5) Tekrar"), a.get("metin",""))
-    if reveal >= 6:
-        a = d["adim6"]
-        make_card(a.get("baslik","6) Kontrol"), a.get("soru",""))
+        make_card("Şimdi sen seç", body)
+        return
 
-def soruyu_isle(soru: str, pdf_text: str, extra_text: str):
+    # metin sorusu
+    if step == 7:
+        ms = d.get("metin_sorusu", {})
+        body = (
+            f"<b>{ms.get('soru','')}</b><br><br>"
+            f"A) {ms.get('A','')}<br>"
+            f"B) {ms.get('B','')}<br>"
+            f"C) {ms.get('C','')}"
+        )
+        make_card("Bir soru daha", body)
+        return
+
+    # tekrar + kontrol
+    if step == 8:
+        make_card("Kısaca", d.get("kisa_tekrar", ""))
+        make_card("Kontrol", d.get("kontrol", ""))
+        return
+
+
+def build_source_text(pdf_text: str, extra_text: str) -> str:
+    # Öğretmen metin vermediyse, yine de çalışsın ama kısa uyarı versin
+    src = ""
+    if pdf_text.strip():
+        src += pdf_text.strip() + "\n"
+    if extra_text.strip():
+        src += extra_text.strip() + "\n"
+    src = src.strip()
+    return src
+
+
+# ------------------ DERS BAŞLAT / GÜNCELLE ------------------
+def start_lesson(lesson_goal: str, pdf_text: str, extra_text: str):
+    source_text = build_source_text(pdf_text, extra_text)
+
+    if not source_text:
+        # Metin yoksa bile model çalışsın, ama hedefi "konu anlatımı" gibi kur
+        source_text = "Metin yok. Konuyu kısa bir metin gibi anlat ve ana fikir çalışması yaptır."
+
+    # kullanıcı mesajı
     with st.chat_message("user"):
-        st.write(soru)
+        st.write(lesson_goal)
 
-    st.session_state.messages.append({"role": "user", "content": soru})
-    st.session_state.user_texts.append(soru)
-    st.session_state.last_user_text = soru
-    log_message(st.session_state.user, "user", soru)
+    st.session_state.messages.append({"role": "user", "content": lesson_goal})
+    st.session_state.user_texts.append(lesson_goal)
+    log_message(st.session_state.user, "user", lesson_goal)
 
+    # asistan üretimi
     with st.chat_message("assistant"):
-        d = ask_model(soru, pdf_text, extra_text)
+        d = ask_model(lesson_goal, source_text)
         st.session_state.last_lesson = d
-        st.session_state.reveal = 1
+        st.session_state.step = 1
 
-        # İlk anda sadece 1. adım göster (çocuk için az yük)
-        show_steps(d, reveal=1)
+        # ilk ekran: açılış + parça 1
+        show_step(d, 1)
 
+        # history/sheet kaydı
         history_text = format_for_history(d)
         st.session_state.last_assistant_text = history_text
         st.session_state.messages.append({"role": "assistant", "content": history_text})
         log_message(st.session_state.user, "assistant", history_text)
+
 
 # ------------------ GİRİŞ ------------------
 if "user" not in st.session_state:
@@ -323,29 +447,31 @@ if "user" not in st.session_state:
 
         st.session_state.user_texts = []
         st.session_state.start_time = datetime.now(ZoneInfo("Europe/Istanbul"))
-        st.session_state.last_user_text = ""
-        st.session_state.last_assistant_text = ""
-        st.session_state.last_lesson = None
-        st.session_state.reveal = 0
-        st.session_state.last_audio_len = 0
 
-        # Giriş yönergesi (net, kısa)
+        st.session_state.last_assistant_text = ""
+        st.session_state.last_audio_len = 0
+        st.session_state.last_lesson = None
+        st.session_state.step = 0
+
         if not st.session_state.messages:
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": (
                     "✅ **Nasıl kullanılır?**\n"
-                    "- Sorunu alttan yaz.\n"
-                    "- 🎤 ile sesle sor.\n"
-                    "- Ben **adım adım** anlatırım.\n"
-                    "- 🆘 ile yardım/SSS açılır.\n"
+                    "- Öğretmen metni (PDF) yükler veya yapıştırır.\n"
+                    "- Sen metni benimle okursun.\n"
+                    "- Sonra ana fikri buluruz ve soruları çözeriz.\n"
+                    "- 🎤 ile sesle sorabilirsin. 🔊 ile dinleyebilirsin.\n"
+                    "- 🆘 ile yardım açılır.\n"
                 )
             })
+
         st.rerun()
+
 
 # ------------------ ANA EKRAN ------------------
 else:
-    # Üst bar: sadece çıkış
+    # Üst bar
     top1, top2 = st.columns([3, 1])
     with top1:
         st.success(f"Hoş geldin 🌈 {st.session_state.user}")
@@ -355,8 +481,8 @@ else:
             st.session_state.clear()
             st.rerun()
 
-    # PDF/metin: öğretmen kullanacak; sade bir expander
-    with st.expander("📄 Öğretmen: PDF / Metin ekle (istersen)", expanded=False):
+    # Öğretmen: metni yükler/yapıştırır
+    with st.expander("📄 Öğretmen: Metni ekle (PDF / Yapıştır)", expanded=False):
         c1, c2 = st.columns(2)
         pdf_text = ""
         extra_text = ""
@@ -369,7 +495,7 @@ else:
                     if txt:
                         pdf_text += txt + "\n"
         with c2:
-            extra_text = st.text_area("Metni buraya yapıştır", height=160)
+            extra_text = st.text_area("Metni buraya yapıştır", height=170)
 
     pdf_text = locals().get("pdf_text", "")
     extra_text = locals().get("extra_text", "")
@@ -379,41 +505,47 @@ else:
         with st.chat_message(m["role"]):
             st.write(m["content"])
 
-    # Adım adım kontrol (çok sade)
+    # Ders adımları (tek tuşla daha sade: DEVAM)
     d = st.session_state.get("last_lesson")
-    if d:
-        st.markdown("### ✅ Adım adım")
-        b1, b2, b3, b4, b5, b6 = st.columns(6)
-        with b1:
-            if st.button("1", use_container_width=True): st.session_state.reveal = 1
-        with b2:
-            if st.button("2", use_container_width=True): st.session_state.reveal = max(st.session_state.reveal, 2)
-        with b3:
-            if st.button("3", use_container_width=True): st.session_state.reveal = max(st.session_state.reveal, 3)
-        with b4:
-            if st.button("4", use_container_width=True): st.session_state.reveal = max(st.session_state.reveal, 4)
-        with b5:
-            if st.button("5", use_container_width=True): st.session_state.reveal = max(st.session_state.reveal, 5)
-        with b6:
-            if st.button("6", use_container_width=True): st.session_state.reveal = max(st.session_state.reveal, 6)
+    if d and st.session_state.step > 0:
+        st.markdown("### ✅ Ders")
+        show_step(d, st.session_state.step)
 
-        show_steps(d, st.session_state.reveal)
-
-        # A/B/C seçim (sadece adım 4 açılınca)
-        if st.session_state.reveal >= 4:
-            a4 = d.get("adim4", {})
-            choice = st.radio("Seç:", ["A", "B", "C"], horizontal=True, index=0, key="abc_choice")
+        # A/B/C etkileşimleri sadece ilgili adımda
+        if st.session_state.step == 6:
+            af = d.get("ana_fikir", {})
+            choice = st.radio("Seç:", ["A", "B", "C"], horizontal=True, index=0, key="choice_af")
             if st.button("Kontrol et", use_container_width=True):
-                if choice == a4.get("dogru", "A"):
-                    make_card("✅", d.get("geribildirim", {}).get("dogru", "Aferin!"))
+                if choice == af.get("dogru", "A"):
+                    make_card("✅", d.get("geribildirim", {}).get("dogru", "Harika!"))
                 else:
                     make_card("🟡", d.get("geribildirim", {}).get("yanlis", "Sorun değil."))
 
-    # ----- ALT BAR: 🎤 mikrofon (emoji) + 🔊 dinle + 🆘 yardım -----
+        if st.session_state.step == 7:
+            ms = d.get("metin_sorusu", {})
+            choice2 = st.radio("Seç:", ["A", "B", "C"], horizontal=True, index=0, key="choice_ms")
+            if st.button("Kontrol et", use_container_width=True):
+                if choice2 == ms.get("dogru", "A"):
+                    make_card("✅", d.get("geribildirim", {}).get("dogru", "Harika!"))
+                else:
+                    make_card("🟡", d.get("geribildirim", {}).get("yanlis", "Sorun değil."))
+
+        # Tek buton: Devam
+        col_next, col_restart = st.columns([2, 1])
+        with col_next:
+            if st.button("➡️ Devam", use_container_width=True):
+                st.session_state.step = min(st.session_state.step + 1, 8)
+                st.rerun()
+        with col_restart:
+            if st.button("🔄 Baştan", use_container_width=True):
+                st.session_state.step = 1
+                st.rerun()
+
+    # ------------------ ALT BAR: 🎤 + 🔊 + 🆘 (CHAT YANINDA) ------------------
     st.markdown('<div class="bottombar"></div>', unsafe_allow_html=True)
     c_mic, c_listen, c_help = st.columns([1, 1, 1])
 
-    # 🎤 Mikrofon: chat alanının yanında küçük emoji gibi (popover varsa)
+    # 🎤 Mikrofon: küçük emoji buton (popover varsa)
     with c_mic:
         try:
             with st.popover("🎤", use_container_width=True):
@@ -441,9 +573,10 @@ else:
                             )
                         mic_text = transcript.text
                         st.info(f"📝 {mic_text}")
-                        soruyu_isle(mic_text, pdf_text, extra_text)
+
+                        # Sesle gelen metin: ders hedefi gibi başlat
+                        start_lesson(mic_text, pdf_text, extra_text)
         except Exception:
-            # popover yoksa expander
             with st.expander("🎤", expanded=False):
                 audio_bytes = audio_recorder(
                     text="Konuş",
@@ -469,7 +602,7 @@ else:
                             )
                         mic_text = transcript.text
                         st.info(f"📝 {mic_text}")
-                        soruyu_isle(mic_text, pdf_text, extra_text)
+                        start_lesson(mic_text, pdf_text, extra_text)
 
     # 🔊 Dinle
     with c_listen:
@@ -478,26 +611,28 @@ else:
             if t.strip():
                 st.audio(tts_bytes(t), format="audio/mp3")
             else:
-                st.warning("Önce bir soru sor 😊")
+                st.warning("Önce bir ders başlatalım 😊")
 
     # 🆘 Yardım (SSS) altta, tıklayınca açılır
     with c_help:
         try:
             with st.popover("🆘", use_container_width=True):
                 st.markdown("### Sıkça Sorulan Sorular")
-                st.markdown("**1) Nasıl soru sorarım?**\n- Alttan yaz veya 🎤 kullan.")
-                st.markdown("**2) PDF varsa ne olur?**\n- Metne göre adım adım anlatırım.")
-                st.markdown("**3) Dinleme nasıl?**\n- 🔊 tuşuna bas.")
-                st.markdown("**4) Yazmak zor gelirse?**\n- A/B/C seçebilirsin.")
+                st.markdown("**1) Ne yapacağız?**\n- Metni birlikte okuyup ana fikri bulacağız.")
+                st.markdown("**2) Yazmak zor gelirse?**\n- A/B/C ile seçebilirsin.")
+                st.markdown("**3) PDF yoksa?**\n- Yine çalışır ama öğretmen metin eklerse daha iyi olur.")
+                st.markdown("**4) Dinlemek?**\n- 🔊 tuşuna bas.")
         except Exception:
             with st.expander("🆘", expanded=False):
                 st.markdown("### Sıkça Sorulan Sorular")
-                st.markdown("**1) Nasıl soru sorarım?**\n- Alttan yaz veya 🎤 kullan.")
-                st.markdown("**2) PDF varsa ne olur?**\n- Metne göre adım adım anlatırım.")
-                st.markdown("**3) Dinleme nasıl?**\n- 🔊 tuşuna bas.")
-                st.markdown("**4) Yazmak zor gelirse?**\n- A/B/C seçebilirsin.")
+                st.markdown("**1) Ne yapacağız?**\n- Metni birlikte okuyup ana fikri bulacağız.")
+                st.markdown("**2) Yazmak zor gelirse?**\n- A/B/C ile seçebilirsin.")
+                st.markdown("**3) PDF yoksa?**\n- Yine çalışır ama öğretmen metin eklerse daha iyi olur.")
+                st.markdown("**4) Dinlemek?**\n- 🔊 tuşuna bas.")
 
-    # Chat input (en altta)
-    soru = st.chat_input("Sorunu yaz")
+    # ------------------ CHAT INPUT (EN ALT) ------------------
+    # Öğrenci buraya hedef yazabilir: “Ana fikri bulalım” / “Bu metni anlat” gibi
+    soru = st.chat_input("Sorunu yaz (ör: Bu metnin ana fikrini bulalım)")
     if soru:
-        soruyu_isle(soru, pdf_text, extra_text)
+        start_lesson(soru, pdf_text, extra_text)
+
