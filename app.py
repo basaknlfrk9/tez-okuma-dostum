@@ -16,37 +16,25 @@ import json
 
 # =========================================================
 # OKUMA DOSTUM — ÖÖG + Sunuş Yoluyla (Metinden okuma → ana fikir → sorular)
-# UI:
-# - Giriş ekranı: ortada başlık, 👋 hoş geldiniz, isim, giriş, kullanım
-# - Giriş sonrası:
-#   * Üstte: sol 📚 + kullanıcı adı, ortada "Okuma Dostum" (kırpılmasın), sağ çıkış paneli
-#   * Sol sidebar: 2 açılır panel (PDF Yükle / Metin Yapıştır)
-#   * Altta: Mesaj kutusu + 🎤 + 🔊 + Gönder (yan yana; Gönder bölünmesin)
-# ÖÖG: Büyük punto + kelime/harf boşlukları
 # =========================================================
 
-# ------------------ SAYFA AYARI ------------------
-st.set_page_config(page_title="Okuma Dostum", layout="wide")
+st.set_page_config(page_title="Okuma Dostum", layout="wide", initial_sidebar_state="expanded")
 
-# ------------------ ÖÖG DOSTU CSS (BÜYÜK PUNTO) ------------------
+# ------------------ ÖÖG DOSTU CSS (BÜYÜK PUNTO + BOŞLUK) ------------------
 st.markdown(
     """
 <style>
-/* GENEL (ÖÖG için büyük) */
+/* GENEL (ÖÖG) */
 html, body, [class*="css"] { font-size: 20px !important; }
 p, li, div, span { line-height: 1.9 !important; }
-
-/* SOHBET */
 .stChatMessage p { font-size: 20px !important; line-height: 1.9 !important; }
 
-/* INPUT/TEXTAREA (PROMPT KUTUSU) */
+/* INPUT/TEXTAREA */
 .stTextInput input, .stTextArea textarea {
   font-size: 20px !important;
   line-height: 1.9 !important;
   padding: 14px 14px !important;
 }
-
-/* Placeholder büyüsün */
 .stTextInput input::placeholder, .stTextArea textarea::placeholder {
   font-size: 18px !important;
   opacity: .65;
@@ -62,11 +50,8 @@ p, li, div, span { line-height: 1.9 !important; }
 /* Okunabilirlik boşluk */
 .stMarkdown { word-spacing: 0.16em !important; letter-spacing: 0.02em !important; }
 
-/* Başlık kırpılma olmasın */
-h1, h2, h3 { overflow: visible !important; }
-
-/* Sayfa genişliği */
-.block-container { padding-top: 0.9rem; padding-bottom: 2.0rem; max-width: 1200px; }
+/* Üst boşluk: başlık kırpılmasın */
+.block-container { padding-top: 1.6rem; padding-bottom: 2.0rem; max-width: none; }
 
 /* Kart */
 .card{
@@ -84,6 +69,15 @@ h1, h2, h3 { overflow: visible !important; }
   font-size:16px;
   opacity:.85;
   margin-bottom:10px;
+}
+
+/* Başlık sınıfı (responsive, asla kaybolmasın) */
+.app-title{
+  text-align:center;
+  font-weight:900;
+  font-size: clamp(22px, 3.2vw, 38px);
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
 /* Alt bar */
@@ -121,7 +115,6 @@ except WorksheetNotFound:
     chat_sheet.append_row(["Kullanici", "Zaman", "Rol", "Mesaj"])
 
 
-# ------------------ SHEETS UTIL ------------------
 def log_message(user, role, content):
     try:
         now_tr = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
@@ -200,26 +193,16 @@ def tts_bytes(text: str) -> bytes:
     return mp3_fp.getvalue()
 
 
-# ------------------ MODEL (ETİKETSİZ, METİNDEN OKUMA) ------------------
+# ------------------ MODEL ------------------
 def system_prompt_json():
     return """
 Sen, özel öğrenme güçlüğü olan (ÖÖG) ortaokul öğrencisi için derste kullanılan yardımcı öğretim materyalisisin.
 Öğretim stratejin: SUNUŞ YOLUYLA ÖĞRETİM (Ausubel).
 
-DERS SENARYOSU:
-Öğretmen bir METİN/PDF verir.
-Öğrenci bu metni seninle okur.
-Hedefler:
-- Metni parça parça okumak ve anlamak
-- Ana fikir / ana tema bulmak
-- Metinden soruları cevaplamak
-- Okuduğunu anlama becerisini güçlendirmek
-
-KURALLAR:
 - Uzun paragraf yok.
 - Kısa cümle, basit kelime.
-- Yazma yükünü azalt: A/B/C sorular.
-- Metin varsa mutlaka metne dayan.
+- A/B/C sorular üret.
+- Metin varsa metne dayan.
 - Akademik etiket yazma.
 - Metni 2-4 kısa parçaya böl.
 
@@ -233,8 +216,7 @@ JSON:
   ],
   "ana_fikir": {"soru":"...", "A":"...", "B":"...", "C":"...", "dogru":"A"},
   "metin_sorusu": {"soru":"...", "A":"...", "B":"...", "C":"...", "dogru":"B"},
-  "kisa_tekrar":"1 cümle",
-  "geribildirim":{"dogru":"1 cümle","yanlis":"1 cümle"}
+  "kisa_tekrar":"1 cümle"
 }
 """
 
@@ -264,14 +246,11 @@ def ask_model(lesson_goal: str, source_text: str) -> dict:
         ],
     )
     d = safe_json_load(resp.choices[0].message.content)
-
     d.setdefault("acilis", "Bugün metni birlikte okuyacağız ve ana fikri bulacağız.")
     d.setdefault("parcalar", [])
     d.setdefault("ana_fikir", {"soru": "Ana fikir hangisi?", "A": "", "B": "", "C": "", "dogru": "A"})
     d.setdefault("metin_sorusu", {"soru": "Metne göre hangisi doğru?", "A": "", "B": "", "C": "", "dogru": "A"})
     d.setdefault("kisa_tekrar", "Kısaca: Ana fikir metnin en önemli mesajıdır.")
-    d.setdefault("geribildirim", {"dogru": "Harika! Metnin tamamını kapsıyor.", "yanlis": "Sorun değil. Metnin tamamını kapsayanı seç."})
-
     if isinstance(d.get("parcalar"), list):
         d["parcalar"] = d["parcalar"][:4]
     else:
@@ -279,7 +258,6 @@ def ask_model(lesson_goal: str, source_text: str) -> dict:
     return d
 
 
-# ------------------ UI HELPERS ------------------
 def make_card(title, body_html):
     st.markdown(
         f"""
@@ -303,13 +281,11 @@ def build_source_text(pdf_text: str, extra_text: str) -> str:
 
 def show_lesson(d: dict):
     make_card("Başlayalım", d.get("acilis", ""))
-
     for i, p in enumerate(d.get("parcalar", []), start=1):
         make_card(
             f"Okuma parçası {i}",
             f"{p.get('metin','')}<br><br>• {p.get('soru1','')}<br>• {p.get('soru2','')}",
         )
-
     af = d.get("ana_fikir", {})
     make_card(
         "Ana fikir seç",
@@ -318,7 +294,6 @@ def show_lesson(d: dict):
         f"B) {af.get('B','')}<br>"
         f"C) {af.get('C','')}",
     )
-
     ms = d.get("metin_sorusu", {})
     make_card(
         "Metinden soru",
@@ -327,7 +302,6 @@ def show_lesson(d: dict):
         f"B) {ms.get('B','')}<br>"
         f"C) {ms.get('C','')}",
     )
-
     make_card("Kısa tekrar", d.get("kisa_tekrar", ""))
 
 
@@ -336,24 +310,17 @@ def start_lesson(lesson_goal: str, pdf_text: str, extra_text: str):
     if not source_text:
         source_text = "Metin yok. Kısa bir metin uydurarak ana fikir çalışması yaptır."
 
-    # Ekranda user balonu
     with st.chat_message("user"):
         st.write(lesson_goal)
 
-    # state + sheets
     st.session_state.messages.append({"role": "user", "content": lesson_goal})
     st.session_state.user_texts.append(lesson_goal)
     log_message(st.session_state.user, "user", lesson_goal)
 
-    # model üret
     d = ask_model(lesson_goal, source_text)
     st.session_state.last_lesson = d
+    st.session_state.last_assistant_text = (d.get("acilis","") + " " + d.get("kisa_tekrar","")).strip()
 
-    # dinleme metni
-    listen_text = (d.get("acilis", "") + " " + d.get("kisa_tekrar", "")).strip()
-    st.session_state.last_assistant_text = listen_text
-
-    # kısa log
     st.session_state.messages.append({"role": "assistant", "content": d.get("kisa_tekrar", "")})
     log_message(st.session_state.user, "assistant", d.get("kisa_tekrar", ""))
 
@@ -382,7 +349,6 @@ if "user" not in st.session_state:
     )
 
     isim = st.text_input("Adını yaz", placeholder="Örn: Ali")
-
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         giris = st.button("Giriş Yap", use_container_width=True)
@@ -408,7 +374,7 @@ if "user" not in st.session_state:
 
 **2) Sen metni benimle okursun**
 - Metni küçük parçalara bölerim.
-- Her parçada iki küçük soru sorarım.
+- Her parçada iki kısa soru sorarım.
 
 **3) Ana fikri buluruz**
 - A/B/C ile seçersin.
@@ -425,11 +391,10 @@ if "user" not in st.session_state:
 
 
 # =========================================================
-# 2) GİRİŞ SONRASI ANA EKRAN
-# (Üst bar kırpılmasın diye columns ile)
+# 2) GİRİŞ SONRASI ANA EKRAN (BAŞLIK DAİMA GÖRÜNSÜN)
 # =========================================================
 
-# --- ÜST BAR ---
+# ÜST BAR
 c_left, c_center, c_right = st.columns([2, 6, 2], vertical_alignment="top")
 
 with c_left:
@@ -437,14 +402,7 @@ with c_left:
     st.markdown(f"**{st.session_state.user}**")
 
 with c_center:
-    st.markdown(
-        """
-        <div style="text-align:center; font-size:34px; font-weight:900; line-height:1.2; margin-top:6px;">
-            Okuma Dostum
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="app-title">Okuma Dostum</div>', unsafe_allow_html=True)
 
 with c_right:
     st.markdown("**Çıkış Paneli**")
@@ -455,7 +413,7 @@ with c_right:
 
 st.markdown("---")
 
-# --- SOL SIDEBAR: 2 ayrı panel ---
+# SIDEBAR: iki panel
 with st.sidebar:
     st.markdown("### 📌 Panel")
     with st.expander("📄 PDF Yükle", expanded=False):
@@ -479,21 +437,20 @@ with st.sidebar:
 pdf_text = st.session_state.get("pdf_text", "")
 extra_text = st.session_state.get("extra_text", "")
 
-# --- SOHBET GEÇMİŞİ ---
+# SOHBET GEÇMİŞİ
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.write(m["content"])
 
-# Ders gösterimi
+# DERS GÖRÜNTÜSÜ
 if st.session_state.get("last_lesson"):
     with st.chat_message("assistant"):
         show_lesson(st.session_state.last_lesson)
 
-# =========================================================
-# ALT GİRİŞ BAR: Mesaj kutusu + 🎤 + 🔊 + Gönder (Gönder bölünmesin)
-# =========================================================
+# ALT BAR: mesaj + 🎤 + 🔊 + Gönder
 st.markdown('<div class="bottombar"></div>', unsafe_allow_html=True)
 c_msg, c_mic, c_listen, c_send = st.columns([8, 1.2, 1.2, 1.8])
 
@@ -508,43 +465,31 @@ with c_msg:
     )
 
 with c_mic:
-    try:
-        with st.popover("🎤", use_container_width=True):
-            st.markdown('<div class="smallhint">Konuş → durdur</div>', unsafe_allow_html=True)
-            audio_bytes = audio_recorder(
-                text="Konuş",
-                pause_threshold=1.8,
-                sample_rate=16000,
-                key="mic_main",
-            )
-            if audio_bytes:
-                last_len = st.session_state.get("last_audio_len", 0)
-                if len(audio_bytes) != last_len:
-                    st.session_state["last_audio_len"] = len(audio_bytes)
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
-                        tmp.write(audio_bytes)
-                        tmp_path = tmp.name
-                    try:
-                        with open(tmp_path, "rb") as f:
-                            transcript = client.audio.transcriptions.create(
-                                model="whisper-1",
-                                file=f,
-                                language="tr",
-                            )
-                        mic_text = transcript.text.strip()
-                        if mic_text:
-                            start_lesson(mic_text, pdf_text, extra_text)
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Ses yazıya çevrilemedi: {e}")
-    except Exception:
-        with st.expander("🎤", expanded=False):
-            audio_bytes = audio_recorder(
-                text="Konuş",
-                pause_threshold=1.8,
-                sample_rate=16000,
-                key="mic_fallback",
-            )
+    with st.popover("🎤", use_container_width=True):
+        st.markdown('<div class="smallhint">Konuş → durdur</div>', unsafe_allow_html=True)
+        audio_bytes = audio_recorder(
+            text="Konuş",
+            pause_threshold=1.8,
+            sample_rate=16000,
+            key="mic_main",
+        )
+        if audio_bytes:
+            last_len = st.session_state.get("last_audio_len", 0)
+            if len(audio_bytes) != last_len:
+                st.session_state["last_audio_len"] = len(audio_bytes)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp:
+                    tmp.write(audio_bytes)
+                    tmp_path = tmp.name
+                with open(tmp_path, "rb") as f:
+                    transcript = client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=f,
+                        language="tr",
+                    )
+                mic_text = transcript.text.strip()
+                if mic_text:
+                    start_lesson(mic_text, pdf_text, extra_text)
+                    st.rerun()
 
 with c_listen:
     if st.button("🔊", use_container_width=True):
