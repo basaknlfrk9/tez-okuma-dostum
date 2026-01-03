@@ -13,7 +13,7 @@ from gtts import gTTS
 from io import BytesIO
 
 # =========================================================
-# OKUMA DOSTUM — ÖÖG & GELİŞİM TAKİP SİSTEMİ (NİHAİ REVİZE)
+# OKUMA DOSTUM — ÖÖG & GELİŞİM TAKİP SİSTEMİ (HATA KORUMALI)
 # =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
@@ -44,7 +44,10 @@ def get_perf_sheet():
     workbook = gc.open_by_url(st.secrets["GSHEET_URL"])
     return workbook.worksheet("Performans")
 
-perf_sheet = get_perf_sheet()
+try:
+    perf_sheet = get_perf_sheet()
+except Exception as e:
+    st.error(f"Google Sheets bağlantı hatası: {e}")
 
 def now_tr_str():
     return datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
@@ -56,17 +59,28 @@ def tts_bytes(text: str) -> bytes:
     gTTS(clean_text[:1000], lang="tr").write_to_fp(mp3_fp)
     return mp3_fp.getvalue()
 
-# ------------------ AI Zekası (ÖÖG Sadeleştirme) ------------------
+# ------------------ AI Zekası (Hata Korumalı JSON) ------------------
 def get_ai_activity(source_text: str):
     system_prompt = """
     Sen ÖÖG (Disleksi) uzmanı bir Türkçe öğretmenisin. 
-    Görevlerin:
-    1) 'sade_metin': Metni 5-8. sınıf seviyesinde, kısa cümlelerle, somutlaştırarak yeniden yaz.
-    2) 'kelimeler': Metindeki en önemli 3 zor kelime ve basit anlamı.
-    3) 'sorular': 6 adet (A,B,C) çoktan seçmeli soru. 
-       Türler mutlaka şunlardan biri olmalı: 'bilgi', 'cikarim', 'ana_fikir', 'baslik', 'kelime'.
-    4) 'ipucu': Her soru için öğrenciyi cevaba yaklaştıran bir cümle.
-    Çıktı sadece JSON formatında olsun.
+    Aşağıdaki JSON yapısına %100 sadık kal:
+    {
+      "sade_metin": "ÖÖG dostu sadeleştirilmiş metin",
+      "kelimeler": [{"kelime": "örnek", "anlam": "açıklama"}],
+      "sorular": [
+        {
+          "kok": "Soru metni buraya",
+          "A": "Seçenek A",
+          "B": "Seçenek B",
+          "C": "Seçenek C",
+          "dogru": "A",
+          "tur": "bilgi",
+          "ipucu": "Cevaba yaklaştıran ipucu"
+        }
+      ]
+    }
+    Türler mutlaka şunlardan biri olmalı: 'bilgi', 'cikarim', 'ana_fikir', 'baslik', 'kelime'.
+    Çıktı sadece saf JSON formatında olsun.
     """
     resp = client.chat.completions.create(
         model="gpt-4o",
@@ -78,9 +92,8 @@ def get_ai_activity(source_text: str):
     )
     return json.loads(resp.choices[0].message.content)
 
-# ------------------ Gelişim Kayıt ------------------
+# ------------------ Gelişim Kayıt (A-J Sütunları) ------------------
 def performans_kaydet_to_sheets():
-    # Süre ve Başarı Hesapla
     sure_saniye = time.time() - st.session_state.start_time_stamp
     dakika = round(sure_saniye / 60, 2)
     
@@ -89,7 +102,7 @@ def performans_kaydet_to_sheets():
     basari_yuzde = round((dogru_sayisi / 6) * 100, 1)
     
     hatalar = []
-    for i, q in enumerate(act['sorular']):
+    for i, q in enumerate(act.get('sorular', [])):
         if st.session_state.correct_map.get(i) == 0:
             hatalar.append(q.get('tur', 'genel'))
     kazanim_notu = ", ".join(set(hatalar)) if hatalar else "Eksik Yok"
@@ -109,10 +122,10 @@ def performans_kaydet_to_sheets():
     perf_sheet.append_row(row)
 
 # =========================================================
-# UYGULAMA AKIŞI (SESSİON STATE KONTROLLÜ)
+# UYGULAMA AKIŞI
 # =========================================================
 
-# Değişkenlerin ilk tanımlanması (Hata almamak için)
+# Değişkenlerin güvenli tanımlanması
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
 if "user" not in st.session_state:
@@ -147,55 +160,68 @@ elif st.session_state.phase == "setup":
         
         if raw:
             with st.spinner("ÖÖG seviyesine göre düzenleniyor..."):
-                st.session_state.activity = get_ai_activity(raw)
-                st.session_state.metin_id = m_id
-                st.session_state.phase = "read"
-                st.session_state.start_time_stamp = time.time()
-                st.session_state.q_index = 0
-                st.session_state.correct_map = {}
-                st.session_state.total_ipucu = 0
-                st.rerun()
+                try:
+                    st.session_state.activity = get_ai_activity(raw)
+                    st.session_state.metin_id = m_id
+                    st.session_state.phase = "read"
+                    st.session_state.start_time_stamp = time.time()
+                    st.session_state.q_index = 0
+                    st.session_state.correct_map = {}
+                    st.session_state.total_ipucu = 0
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Metin işlenirken bir hata oluştu: {e}")
         else:
             st.warning("Lütfen bir metin girin.")
 
 # 3. OKUMA AŞAMASI
 elif st.session_state.phase == "read":
     act = st.session_state.activity
-    st.markdown(f"<div class='highlight-box'>{act['sade_metin']}</div>", unsafe_allow_html=True)
+    sade_metin = act.get('sade_metin', 'Metin yüklenemedi.')
+    st.markdown(f"<div class='highlight-box'>{sade_metin}</div>", unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
     with col1:
         if st.button("🔊 Dinle"):
-            st.audio(tts_bytes(act['sade_metin']))
+            st.audio(tts_bytes(sade_metin))
     with col2:
         if st.button("✅ Okudum, Sorulara Geç"):
             st.session_state.phase = "questions"
             st.rerun()
 
-# 4. SORULAR AŞAMASI
+# 4. SORULAR AŞAMASI (KeyError Korumalı)
 elif st.session_state.phase == "questions":
     act = st.session_state.activity
     idx = st.session_state.q_index
+    sorular = act.get('sorular', [])
     
-    if idx < len(act['sorular']):
-        q = act['sorular'][idx]
+    if idx < len(sorular):
+        q = sorular[idx]
+        
+        # HATA KORUMASI: 'kok' yerine 'soru' gelirse de çalışması için
+        soru_metni = q.get('kok') or q.get('soru') or q.get('soru_metni') or "Soru metni bulunamadı."
+        
         st.markdown(f"### Soru {idx+1}")
-        st.markdown(f"<div class='card'>{q['kok']}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card'>{soru_metni}</div>", unsafe_allow_html=True)
         
         for opt in ["A", "B", "C"]:
-            if st.button(f"{opt}) {q[opt]}", key=f"q_{idx}_{opt}"):
-                st.session_state.correct_map[idx] = 1 if opt == q['dogru'] else 0
+            opt_text = q.get(opt, "Seçenek yok")
+            if st.button(f"{opt}) {opt_text}", key=f"q_{idx}_{opt}"):
+                st.session_state.correct_map[idx] = 1 if opt == q.get('dogru', 'A') else 0
                 st.session_state.q_index += 1
                 st.rerun()
         
         if st.button("💡 İpucu Al", key=f"hint_{idx}"):
             st.session_state.total_ipucu += 1
-            st.info(q.get('ipucu', 'Metne tekrar bakmaya ne dersin?'))
+            st.info(q.get('ipucu', 'Metne tekrar bakmayı dene!'))
     else:
         with st.spinner("Veriler kaydediliyor..."):
-            performans_kaydet_to_sheets()
-            st.session_state.phase = "done"
-            st.rerun()
+            try:
+                performans_kaydet_to_sheets()
+                st.session_state.phase = "done"
+                st.rerun()
+            except Exception as e:
+                st.error(f"Kayıt sırasında hata: {e}")
 
 # 5. BİTİŞ EKRANI
 elif st.session_state.phase == "done":
