@@ -10,7 +10,7 @@ from gtts import gTTS
 from io import BytesIO
 
 # =========================================================
-# OKUMA DOSTUM — ÖÖG & GELİŞİM TAKİP (GÜNCEL SÜTUN DÜZENİ)
+# OKUMA DOSTUM — GELİŞMİŞ ÖÖG DESTEK SİSTEMİ
 # =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
@@ -19,7 +19,7 @@ st.markdown("""
 <style>
     html, body, [class*="css"] { font-size: 22px !important; }
     p, li, div, span { line-height: 2.1 !important; }
-    .stButton button { font-size: 20px !important; border-radius: 15px !important; padding: 12px !important; width: 100%; }
+    .stButton button { font-size: 20px !important; border-radius: 15px !important; padding: 12px !important; }
     .highlight-box { background-color: #fcfcfc; padding: 30px; border-radius: 20px; border: 2px solid #e0e0e0; font-size: 24px !important; margin-bottom: 20px; white-space: pre-wrap; }
     .card { border: 1px solid #ddd; border-radius: 15px; padding: 20px; background: white; margin-bottom: 10px; }
 </style>
@@ -41,11 +41,14 @@ def now_tr_str():
 
 def tts_bytes(text: str) -> bytes:
     mp3_fp = BytesIO()
-    gTTS(re.sub(r"[*#_]", "", text)[:1000], lang="tr").write_to_fp(mp3_fp)
+    gTTS(re.sub(r"[*#_]", "", text)[:1200], lang="tr").write_to_fp(mp3_fp)
     return mp3_fp.getvalue()
 
 def get_ai_activity(source_text: str):
-    system_prompt = """ÖÖG uzmanı bir öğretmensin. JSON formatında 6 soru üret. 
+    # Metni çok kısaltmaması için prompt güncellendi
+    system_prompt = """ÖÖG uzmanı bir öğretmensin. 
+    1) 'sade_metin': Kaynak metni orta uzunlukta (çok kısaltmadan) tut. Sadece karmaşık cümleleri sadeleştir ve paragrafları belirginleştir.
+    2) JSON formatında 6 soru üret. 
     JSON şeması: {"sade_metin": "", "sorular": [{"kok": "", "A": "", "B": "", "C": "", "dogru": "A", "tur": "bilgi", "ipucu": ""}]}"""
     resp = client.chat.completions.create(
         model="gpt-4o",
@@ -64,23 +67,23 @@ def performans_kaydet():
     
     hatalar = [q.get('tur') for i, q in enumerate(sorular) if st.session_state.correct_map.get(i) == 0]
     
-    # 7.jpg görselindeki sütun sırasına (A-O) tam uyum:
+    # GÖRSEL 7.JPG SÜTUN SIRALAMASI (A-O):
     row = [
         st.session_state.session_id,     # A: OturumID
         st.session_state.user,          # B: Kullanici
         st.session_state.login_time,    # C: TarihSaat
-        dakika,                         # D: SureDakika
+        dakika,                         # D: SureDakika (Dakika sütunu)
         st.session_state.sinif,         # E: SinifDuzeyi
         yuzde,                          # F: BasariYuzde
         len(sorular),                   # G: ToplamSoru
         dogru_sayisi,                   # H: DogruSayi
-        ", ".join(set(hatalar)) if hatalar else "Yok", # I: HataliKazanim
-        st.session_state.metin_id,       # J: MetinID
+        ", ".join(set(hatalar)) if hatalar else "Yok", # I: HataliKazanim (DogrulukYuzde başlığının altı)
+        st.session_state.metin_id,       # J: MetinID (OrtalamaSureSr başlığının altı)
         st.session_state.total_ipucu,   # K: ToplamIpucu
-        "Evet" if st.session_state.ana_fikir_dogru else "Hayır", # L: AnaFikirDogru
-        "Evet" if st.session_state.cikarim_dogru else "Hayır",   # M: CikarimDogru
+        "Evet" if st.session_state.ana_fikir_dogru else "Hayır", # L: AnaFikirDogruM
+        "Evet" if st.session_state.cikarim_dogru else "Hayır",   # M: CikarimDogruMu
         st.session_state.tts_count,      # N: TTS_Kullanim
-        0                               # O: Mic_Kullanim (Varsayılan 0)
+        0                               # O: Mic_Kullanim
     ]
     perf_sheet.append_row(row)
 
@@ -111,7 +114,7 @@ elif st.session_state.phase == "setup":
         if up:
             raw = "\n".join([p.extract_text() for p in PdfReader(up).pages if p.extract_text()])
         if raw:
-            with st.spinner("Hazırlanıyor..."):
+            with st.spinner("Metin inceleniyor ve sadeleştiriliyor..."):
                 st.session_state.activity = get_ai_activity(raw)
                 st.session_state.metin_id = m_id
                 st.session_state.phase = "read"; st.session_state.q_index = 0
@@ -140,31 +143,36 @@ elif st.session_state.phase == "questions":
     if idx < len(sorular):
         q = sorular[idx]
         st.markdown(f"### Soru {idx+1}")
-        st.markdown(f"<div class='card'>{q.get('kok','Soru bulunamadı')}</div>", unsafe_allow_html=True)
-        for opt in ["A", "B", "C"]:
-            if st.button(f"{opt}) {q.get(opt)}", key=f"q_{idx}_{opt}"):
-                is_correct = (opt == q.get('dogru'))
-                st.session_state.correct_map[idx] = 1 if is_correct else 0
-                
-                # Kazanım Analizi (L ve M sütunları için)
-                if is_correct:
-                    if q.get('tur') == 'ana_fikir': st.session_state.ana_fikir_dogru = True
-                    if q.get('tur') == 'cikarim': st.session_state.cikarim_dogru = True
-                    st.success("🌟 Tebrikler! Doğru.")
-                else:
-                    st.error(f"❌ Yanlış. Doğru cevap: {q.get('dogru')}")
-                
-                time.sleep(2)
-                st.session_state.q_index += 1
-                st.rerun()
-        if st.button("💡 İpucu"):
+        st.markdown(f"<div class='card'>{q.get('kok')}</div>", unsafe_allow_html=True)
+        
+        # Seçenek butonları
+        colA, colB, colC = st.columns(3)
+        cols = [colA, colB, colC]
+        for i, opt in enumerate(["A", "B", "C"]):
+            with cols[i]:
+                if st.button(f"{opt}) {q.get(opt)}", key=f"q_{idx}_{opt}"):
+                    if opt == q.get('dogru'):
+                        st.session_state.correct_map[idx] = 1
+                        if q.get('tur') == 'ana_fikir': st.session_state.ana_fikir_dogru = True
+                        if q.get('tur') == 'cikarim': st.session_state.cikarim_dogru = True
+                        st.success("🌟 Harika! Doğru cevabı buldun.")
+                        time.sleep(1.5)
+                        st.session_state.q_index += 1
+                        st.rerun()
+                    else:
+                        # Yanlış şıkta doğruyu söylemiyoruz, ipucuna yönlendiriyoruz
+                        st.warning("Bu cevap pek uymadı. İpucunu okuyup tekrar deneyebilirsin! ✨")
+                        st.session_state.correct_map[idx] = 0 # İlk deneme yanlış olarak kaydedilir
+        
+        if st.button("💡 İpucu Al"):
             st.session_state.total_ipucu += 1
-            st.info(q.get('ipucu', 'Metne bak!'))
+            st.info(f"Yardımcı Bilgi: {q.get('ipucu')}")
     else:
-        performans_kaydet()
-        st.session_state.phase = "done"; st.rerun()
+        with st.spinner("Sonuçlar kaydediliyor..."):
+            performans_kaydet()
+            st.session_state.phase = "done"; st.rerun()
 
 elif st.session_state.phase == "done":
-    st.balloons(); st.success("Tamamlandı! Veriler tabloya işlendi.")
-    if st.button("Yeni Metin"):
+    st.balloons(); st.success("Bugünkü çalışmanı başarıyla tamamladın!")
+    if st.button("Yeni Bir Metinle Devam Et"):
         st.session_state.phase = "setup"; st.rerun()
