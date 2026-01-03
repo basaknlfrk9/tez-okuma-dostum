@@ -19,11 +19,9 @@ import json
 # UI:
 # - Giriş ekranı: ortada başlık, 👋 hoş geldiniz, isim, giriş, kullanım
 # - Giriş sonrası:
-#   * Üstte ortada "Okuma Dostum"
-#   * Sol: 📚 + kullanıcı adı
-#   * Sağ: Çıkış Paneli + Çıkış
-#   * Sol sidebar: iki açılır panel (PDF Yükle / Metin Yapıştır)
-#   * Altta: Mesaj kutusu + 🎤 + 🔊 + Gönder (yan yana)
+#   * Üstte: sol 📚 + kullanıcı adı, ortada "Okuma Dostum" (kırpılmasın), sağ çıkış paneli
+#   * Sol sidebar: 2 açılır panel (PDF Yükle / Metin Yapıştır)
+#   * Altta: Mesaj kutusu + 🎤 + 🔊 + Gönder (yan yana; Gönder bölünmesin)
 # ÖÖG: Büyük punto + kelime/harf boşlukları
 # =========================================================
 
@@ -64,6 +62,9 @@ p, li, div, span { line-height: 1.9 !important; }
 /* Okunabilirlik boşluk */
 .stMarkdown { word-spacing: 0.16em !important; letter-spacing: 0.02em !important; }
 
+/* Başlık kırpılma olmasın */
+h1, h2, h3 { overflow: visible !important; }
+
 /* Sayfa genişliği */
 .block-container { padding-top: 0.9rem; padding-bottom: 2.0rem; max-width: 1200px; }
 
@@ -83,24 +84,6 @@ p, li, div, span { line-height: 1.9 !important; }
   font-size:16px;
   opacity:.85;
   margin-bottom:10px;
-}
-
-/* Üst bar */
-.topbar{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:12px;
-  padding:10px 0 8px 0;
-}
-.leftbox{ width:240px; }
-.centerbox{ flex:1; text-align:center; }
-.rightbox{ width:260px; text-align:right; }
-
-.titleBig{
-  font-size:30px;
-  font-weight:900;
-  line-height:1.2;
 }
 
 /* Alt bar */
@@ -353,7 +336,7 @@ def start_lesson(lesson_goal: str, pdf_text: str, extra_text: str):
     if not source_text:
         source_text = "Metin yok. Kısa bir metin uydurarak ana fikir çalışması yaptır."
 
-    # ekranda user balonu
+    # Ekranda user balonu
     with st.chat_message("user"):
         st.write(lesson_goal)
 
@@ -370,7 +353,7 @@ def start_lesson(lesson_goal: str, pdf_text: str, extra_text: str):
     listen_text = (d.get("acilis", "") + " " + d.get("kisa_tekrar", "")).strip()
     st.session_state.last_assistant_text = listen_text
 
-    # sheets kısa log
+    # kısa log
     st.session_state.messages.append({"role": "assistant", "content": d.get("kisa_tekrar", "")})
     log_message(st.session_state.user, "assistant", d.get("kisa_tekrar", ""))
 
@@ -443,34 +426,34 @@ if "user" not in st.session_state:
 
 # =========================================================
 # 2) GİRİŞ SONRASI ANA EKRAN
+# (Üst bar kırpılmasın diye columns ile)
 # =========================================================
 
-# --- ÜST BAR: sol (kitap+isim), orta (başlık), sağ (çıkış paneli) ---
-st.markdown(
-    f"""
-<div class="topbar">
-  <div class="leftbox">
-    <div style="font-size:30px;">📚</div>
-    <div style="margin-top:6px; font-weight:900;">{st.session_state.user}</div>
-  </div>
-  <div class="centerbox">
-    <div class="titleBig">Okuma Dostum</div>
-  </div>
-  <div class="rightbox">
-    <div style="font-weight:900; margin-bottom:6px;">Çıkış Paneli</div>
-  </div>
-</div>
-""",
-    unsafe_allow_html=True,
-)
+# --- ÜST BAR ---
+c_left, c_center, c_right = st.columns([2, 6, 2], vertical_alignment="top")
 
-# Sağ: gerçek çıkış butonu
-_, _, top_right = st.columns([1, 4, 1])
-with top_right:
+with c_left:
+    st.markdown("### 📚")
+    st.markdown(f"**{st.session_state.user}**")
+
+with c_center:
+    st.markdown(
+        """
+        <div style="text-align:center; font-size:34px; font-weight:900; line-height:1.2; margin-top:6px;">
+            Okuma Dostum
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with c_right:
+    st.markdown("**Çıkış Paneli**")
     if st.button("Çıkış Yap", use_container_width=True):
         oturum_ozeti_yaz()
         st.session_state.clear()
         st.rerun()
+
+st.markdown("---")
 
 # --- SOL SIDEBAR: 2 ayrı panel ---
 with st.sidebar:
@@ -509,10 +492,10 @@ if st.session_state.get("last_lesson"):
         show_lesson(st.session_state.last_lesson)
 
 # =========================================================
-# ALT GİRİŞ BAR: Mesaj kutusu + 🎤 + 🔊 + Gönder
+# ALT GİRİŞ BAR: Mesaj kutusu + 🎤 + 🔊 + Gönder (Gönder bölünmesin)
 # =========================================================
 st.markdown('<div class="bottombar"></div>', unsafe_allow_html=True)
-c_msg, c_mic, c_listen, c_send = st.columns([7, 1, 1, 1])
+c_msg, c_mic, c_listen, c_send = st.columns([8, 1.2, 1.2, 1.8])
 
 with c_msg:
     st.session_state.draft = st.text_area(
@@ -578,4 +561,3 @@ with c_send:
             start_lesson(msg, pdf_text, extra_text)
             st.session_state.draft = ""
             st.rerun()
-
