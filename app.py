@@ -16,49 +16,73 @@ import json
 
 # =========================================================
 # OKUMA DOSTUM — ÖÖG + Sunuş Yoluyla (Metinden okuma → ana fikir → sorular)
-# UI İsteklerin:
-# - Giriş ekranı (tamam)
+# UI:
+# - Giriş ekranı: ortada başlık, 👋 hoş geldiniz, isim, giriş, kullanım
 # - Giriş sonrası:
-#   * Üstte ortada "Okuma Dostum" (tam görünsün)
-#   * Sol: 📚 ve altında kullanıcı adı
-#   * Sağ: Çıkış paneli
-#   * Sol panel (açılır): PDF Yükle / Metin Yapıştır (iki ayrı panel)
-#   * Altta sohbet çubuğunun bitişinde: 🎤 ve 🔊
-# - Punto 12 + kelime/harf boşlukları (ÖÖG)
+#   * Üstte ortada "Okuma Dostum"
+#   * Sol: 📚 + kullanıcı adı
+#   * Sağ: Çıkış Paneli + Çıkış
+#   * Sol sidebar: iki açılır panel (PDF Yükle / Metin Yapıştır)
+#   * Altta: Mesaj kutusu + 🎤 + 🔊 + Gönder (yan yana)
+# ÖÖG: Büyük punto + kelime/harf boşlukları
 # =========================================================
 
 # ------------------ SAYFA AYARI ------------------
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
-# ------------------ ÖÖG DOSTU CSS (PUNTO 12 + BOŞLUK) ------------------
+# ------------------ ÖÖG DOSTU CSS (BÜYÜK PUNTO) ------------------
 st.markdown(
     """
 <style>
-html, body, [class*="css"] { font-size: 12px !important; }
-p, li, div, span { line-height: 1.75 !important; }
-.stChatMessage p { font-size: 12px !important; line-height: 1.75 !important; }
-.stTextInput input, .stTextArea textarea { font-size: 12px !important; line-height: 1.75 !important; }
-.stMarkdown { word-spacing: 0.14em !important; letter-spacing: 0.02em !important; }
+/* GENEL (ÖÖG için büyük) */
+html, body, [class*="css"] { font-size: 20px !important; }
+p, li, div, span { line-height: 1.9 !important; }
+
+/* SOHBET */
+.stChatMessage p { font-size: 20px !important; line-height: 1.9 !important; }
+
+/* INPUT/TEXTAREA (PROMPT KUTUSU) */
+.stTextInput input, .stTextArea textarea {
+  font-size: 20px !important;
+  line-height: 1.9 !important;
+  padding: 14px 14px !important;
+}
+
+/* Placeholder büyüsün */
+.stTextInput input::placeholder, .stTextArea textarea::placeholder {
+  font-size: 18px !important;
+  opacity: .65;
+}
+
+/* BUTON */
+.stButton button{
+  font-size: 18px !important;
+  border-radius: 16px !important;
+  padding: 10px 14px !important;
+}
+
+/* Okunabilirlik boşluk */
+.stMarkdown { word-spacing: 0.16em !important; letter-spacing: 0.02em !important; }
 
 /* Sayfa genişliği */
-.block-container { padding-top: 0.8rem; padding-bottom: 1.8rem; max-width: 1200px; }
+.block-container { padding-top: 0.9rem; padding-bottom: 2.0rem; max-width: 1200px; }
 
 /* Kart */
 .card{
   border:1px solid rgba(0,0,0,.12);
-  border-radius:16px;
-  padding:12px 14px;
-  margin:10px 0;
-  background: rgba(255,255,255,.90);
+  border-radius:18px;
+  padding:16px 18px;
+  margin:12px 0;
+  background: rgba(255,255,255,.92);
 }
 .badge{
   display:inline-block;
-  padding:3px 9px;
+  padding:6px 12px;
   border-radius:999px;
   border:1px solid rgba(0,0,0,.12);
-  font-size:11px;
+  font-size:16px;
   opacity:.85;
-  margin-bottom:8px;
+  margin-bottom:10px;
 }
 
 /* Üst bar */
@@ -69,35 +93,26 @@ p, li, div, span { line-height: 1.75 !important; }
   gap:12px;
   padding:10px 0 8px 0;
 }
-.leftbox{
-  width:220px;
-}
-.centerbox{
-  flex:1;
-  text-align:center;
-}
-.rightbox{
-  width:240px;
-  text-align:right;
-}
+.leftbox{ width:240px; }
+.centerbox{ flex:1; text-align:center; }
+.rightbox{ width:260px; text-align:right; }
 
 .titleBig{
-  font-size:26px;
+  font-size:30px;
   font-weight:900;
   line-height:1.2;
 }
 
-/* Alt giriş bar */
+/* Alt bar */
 .bottombar{
   position: sticky;
   bottom: 0;
-  background: rgba(255,255,255,0.92);
+  background: rgba(255,255,255,0.94);
   border-top: 1px solid rgba(0,0,0,0.08);
-  padding: 10px 0 6px 0;
+  padding: 12px 0 8px 0;
   backdrop-filter: blur(6px);
 }
-.stButton button{ border-radius:14px !important; padding:8px 12px !important; }
-.smallhint{ font-size: 11px; opacity: .7; }
+.smallhint{ font-size: 14px; opacity: .7; }
 </style>
 """,
     unsafe_allow_html=True,
@@ -223,6 +238,7 @@ KURALLAR:
 - Yazma yükünü azalt: A/B/C sorular.
 - Metin varsa mutlaka metne dayan.
 - Akademik etiket yazma.
+- Metni 2-4 kısa parçaya böl.
 
 ÇIKTI: SADECE JSON.
 
@@ -303,7 +319,6 @@ def build_source_text(pdf_text: str, extra_text: str) -> str:
 
 
 def show_lesson(d: dict):
-    # Etiketsiz, sade görünüm
     make_card("Başlayalım", d.get("acilis", ""))
 
     for i, p in enumerate(d.get("parcalar", []), start=1):
@@ -338,26 +353,30 @@ def start_lesson(lesson_goal: str, pdf_text: str, extra_text: str):
     if not source_text:
         source_text = "Metin yok. Kısa bir metin uydurarak ana fikir çalışması yaptır."
 
-    # user message
+    # ekranda user balonu
+    with st.chat_message("user"):
+        st.write(lesson_goal)
+
+    # state + sheets
     st.session_state.messages.append({"role": "user", "content": lesson_goal})
     st.session_state.user_texts.append(lesson_goal)
     log_message(st.session_state.user, "user", lesson_goal)
 
-    # assistant produce
+    # model üret
     d = ask_model(lesson_goal, source_text)
     st.session_state.last_lesson = d
 
     # dinleme metni
-    listen_text = d.get("acilis", "") + " " + d.get("kisa_tekrar", "")
-    st.session_state.last_assistant_text = listen_text.strip()
+    listen_text = (d.get("acilis", "") + " " + d.get("kisa_tekrar", "")).strip()
+    st.session_state.last_assistant_text = listen_text
 
-    # history log (kısa)
+    # sheets kısa log
     st.session_state.messages.append({"role": "assistant", "content": d.get("kisa_tekrar", "")})
     log_message(st.session_state.user, "assistant", d.get("kisa_tekrar", ""))
 
 
 # =========================================================
-# 1) GİRİŞ EKRANI (dış kısım süper dediğin ekran)
+# 1) GİRİŞ EKRANI
 # =========================================================
 if "user" not in st.session_state:
     st.markdown(
@@ -423,7 +442,7 @@ if "user" not in st.session_state:
 
 
 # =========================================================
-# 2) GİRİŞ SONRASI ANA EKRAN (İSTEDİĞİN DİZAYN)
+# 2) GİRİŞ SONRASI ANA EKRAN
 # =========================================================
 
 # --- ÜST BAR: sol (kitap+isim), orta (başlık), sağ (çıkış paneli) ---
@@ -431,83 +450,77 @@ st.markdown(
     f"""
 <div class="topbar">
   <div class="leftbox">
-    <div style="font-size:26px;">📚</div>
-    <div style="margin-top:4px; font-weight:800;">{st.session_state.user}</div>
+    <div style="font-size:30px;">📚</div>
+    <div style="margin-top:6px; font-weight:900;">{st.session_state.user}</div>
   </div>
   <div class="centerbox">
     <div class="titleBig">Okuma Dostum</div>
   </div>
   <div class="rightbox">
-    <div style="font-weight:800; margin-bottom:6px;">Çıkış Paneli</div>
+    <div style="font-weight:900; margin-bottom:6px;">Çıkış Paneli</div>
   </div>
 </div>
 """,
     unsafe_allow_html=True,
 )
 
-# Sağ taraftaki çıkış butonu (kolonla gerçek buton)
-top_left, top_mid, top_right = st.columns([1, 4, 1])
+# Sağ: gerçek çıkış butonu
+_, _, top_right = st.columns([1, 4, 1])
 with top_right:
     if st.button("Çıkış Yap", use_container_width=True):
         oturum_ozeti_yaz()
         st.session_state.clear()
         st.rerun()
 
-# --- SOL PANEL (açılır): PDF yükle / Metin yapıştır ---
+# --- SOL SIDEBAR: 2 ayrı panel ---
 with st.sidebar:
     st.markdown("### 📌 Panel")
     with st.expander("📄 PDF Yükle", expanded=False):
-        st.session_state.pdf_text = ""
         pdf_file = st.file_uploader("PDF seç", type="pdf", key="pdf_uploader")
         if pdf_file is not None:
             try:
                 reader = PdfReader(pdf_file)
-                pdf_text = ""
+                txt_all = ""
                 for page in reader.pages:
                     txt = page.extract_text()
                     if txt:
-                        pdf_text += txt + "\n"
-                st.session_state.pdf_text = pdf_text.strip()
+                        txt_all += txt + "\n"
+                st.session_state.pdf_text = txt_all.strip()
                 st.success("PDF yüklendi ✔️")
             except Exception as e:
                 st.error(f"PDF okunamadı: {e}")
 
     with st.expander("📝 Metin Yapıştır", expanded=False):
-        st.session_state.extra_text = st.text_area(
-            "Metni buraya yapıştır",
-            height=220,
-            key="extra_text_area",
-        )
+        st.session_state.extra_text = st.text_area("Metni buraya yapıştır", height=220, key="extra_text_area")
 
-# güvenli varsayılanlar
 pdf_text = st.session_state.get("pdf_text", "")
 extra_text = st.session_state.get("extra_text", "")
 
-# --- SOHBET ALANI ---
+# --- SOHBET GEÇMİŞİ ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 for m in st.session_state.messages:
     with st.chat_message(m["role"]):
         st.write(m["content"])
 
-# Ders üretildiyse, göster
+# Ders gösterimi
 if st.session_state.get("last_lesson"):
     with st.chat_message("assistant"):
         show_lesson(st.session_state.last_lesson)
 
 # =========================================================
-# ALT GİRİŞ ÇUBUĞU: [Mesaj] + 🎤 + 🔊 (SOHBET ÇUBUĞUNUN BİTİŞİNDE)
-# Streamlit chat_input yanına buton koymak zor olduğu için
-# burada text_input ile "sohbet çubuğu" görünümü kuruyoruz.
+# ALT GİRİŞ BAR: Mesaj kutusu + 🎤 + 🔊 + Gönder
 # =========================================================
 st.markdown('<div class="bottombar"></div>', unsafe_allow_html=True)
-
 c_msg, c_mic, c_listen, c_send = st.columns([7, 1, 1, 1])
 
 with c_msg:
-    st.session_state.draft = st.text_input(
+    st.session_state.draft = st.text_area(
         "Mesaj",
         value=st.session_state.get("draft", ""),
         placeholder="Sorunu yaz (ör: Bu metnin ana fikrini bulalım)",
         label_visibility="collapsed",
+        height=70,
         key="draft_input",
     )
 
@@ -537,15 +550,11 @@ with c_mic:
                             )
                         mic_text = transcript.text.strip()
                         if mic_text:
-                            # kullanıcı mesajı gibi işle
-                            with st.chat_message("user"):
-                                st.write(mic_text)
                             start_lesson(mic_text, pdf_text, extra_text)
                             st.rerun()
                     except Exception as e:
                         st.error(f"Ses yazıya çevrilemedi: {e}")
     except Exception:
-        # popover yoksa küçük expander
         with st.expander("🎤", expanded=False):
             audio_bytes = audio_recorder(
                 text="Konuş",
@@ -566,8 +575,7 @@ with c_send:
     if st.button("Gönder", use_container_width=True):
         msg = st.session_state.get("draft_input", "").strip()
         if msg:
-            with st.chat_message("user"):
-                st.write(msg)
             start_lesson(msg, pdf_text, extra_text)
             st.session_state.draft = ""
             st.rerun()
+
