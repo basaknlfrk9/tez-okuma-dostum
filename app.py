@@ -10,308 +10,191 @@ from gtts import gTTS
 from io import BytesIO
 
 # =========================================================
-# OKUMA DOSTUM — ÖÖG DESTEKLİ & AKILLI REHBER SİSTEMİ
+# ZORUNLU DEBUG (HER KOŞULDA GÖRÜNÜR)
 # =========================================================
-
-DEBUG = True  # her şey düzeldikten sonra False yap
-
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
-# Tasarım
-st.markdown("""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&display=swap');
-    html, body, [class*="css"] { font-family: 'Lexend', sans-serif; font-size: 22px; }
-    .stButton button {
-        width: 100%; border-radius: 20px; height: 3.5em;
-        font-weight: 600; font-size: 22px !important; transition: 0.3s;
-        border: 3px solid #eee; background-color: #3498db; color: white;
-    }
-    .highlight-box {
-        background-color: #ffffff; padding: 35px; border-radius: 30px;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.08); border-left: 15px solid #f1c40f;
-        font-size: 26px !important; line-height: 2.2 !important; margin-bottom: 30px;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.error("🔴 DEBUG BAR: BU YAZIYI GÖRMÜYORSAN YANLIŞ DOSYA ÇALIŞIYOR")
 
-# ---------------------------
-# OpenAI Client
-# ---------------------------
-def get_ai_client():
-    try:
-        return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-    except Exception:
-        st.error("Secrets alanına OPENAI_API_KEY ekleyin.")
-        st.stop()
+st.write("Secrets kontrol:",
+         "OPENAI_API_KEY" in st.secrets,
+         "GSHEET_URL" in st.secrets,
+         "GSHEETS" in st.secrets)
 
-client = get_ai_client()
-
-# ---------------------------
-# Google Sheets (stabil)
-# ---------------------------
-@st.cache_resource
-def get_ws():
+# =========================================================
+# GOOGLE SHEETS TEST (EN ÜSTTE)
+# =========================================================
+def test_sheets():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
 
     info = dict(st.secrets["GSHEETS"])
-
-    # Secrets bazen \\n olarak geliyor -> gerçek newline'a çevir
-    pk = info.get("private_key", "")
-    if isinstance(pk, str) and "\\n" in pk:
-        info["private_key"] = pk.replace("\\n", "\n")
+    if "\\n" in info.get("private_key", ""):
+        info["private_key"] = info["private_key"].replace("\\n", "\n")
 
     creds = Credentials.from_service_account_info(info, scopes=scope)
     gc = gspread.authorize(creds)
-
     sh = gc.open_by_url(st.secrets["GSHEET_URL"])
 
-    if DEBUG:
-        st.write("✅ Service account:", info.get("client_email"))
-        st.write("✅ Sheet tabs:", [w.title for w in sh.worksheets()])
+    st.write("📄 Sheet sekmeleri:", [w.title for w in sh.worksheets()])
 
-    ws = sh.worksheet("Performans")  # sekme adı birebir aynı olmalı
-    return ws
+    ws = sh.worksheet("Performans")
+    ws.append_row(
+        ["TEST", "TEST", "TEST", 0.1, "5", "%0", 6, 0, "Analiz",
+         "Metin_1", 0, "Evet", "Evet", 0, 0],
+        value_input_option="USER_ENTERED"
+    )
 
-def save_to_sheets(row):
+if st.button("🧪 GOOGLE SHEETS TEST (1 satır yaz)"):
     try:
-        ws = get_ws()
-        result = ws.append_row(row, value_input_option="USER_ENTERED")
-        if DEBUG:
-            st.success("✅ Satır eklendi (append_row OK)")
-            st.write("append_row result:", result)
-        return True
+        test_sheets()
+        st.success("✅ GOOGLE SHEETS YAZDI")
     except Exception:
-        st.error("❌ Veri Kayıt Hatası (tam iz):")
+        st.error("❌ GOOGLE SHEETS HATASI (TAM)")
         st.code(traceback.format_exc())
-        return False
 
-# ---------------------------
-# Ses
-# ---------------------------
-def get_audio(text):
-    clean = re.sub(r"[*#_]", "", text)
-    clean = clean[:1000]
-    tts = gTTS(text=clean, lang="tr")
-    fp = BytesIO()
-    tts.write_to_fp(fp)
-    fp.seek(0)
-    return fp
+st.divider()
 
-# ---------------------------
-# Session State Init
-# ---------------------------
+# =========================================================
+# OPENAI
+# =========================================================
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+# =========================================================
+# SESSION
+# =========================================================
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-# Global çıkış
-if st.session_state.phase != "auth":
-    col_x, col_y = st.columns([9, 1])
-    with col_y:
-        if st.button("Çıkış 🚪"):
-            st.session_state.clear()
-            st.rerun()
-
-# Debug: Sheets test (her fazda görünsün istersen)
-if DEBUG:
-    st.divider()
-    st.subheader("🧪 Google Sheets Bağlantı Testi (DEBUG)")
-    if st.button("TEST: Performans'a 1 satır yaz"):
-        test_row = [
-            "test_session", "test_user", "test_time", 0.1, "5",
-            "%0", 6, 0, "Analiz", "Metin_1", 0, "Evet", "Evet", 0, 0
-        ]
-        ok = save_to_sheets(test_row)
-        st.write("save_to_sheets sonucu:", ok)
-    st.divider()
 
 # =========================================================
 # 1) GİRİŞ
 # =========================================================
 if st.session_state.phase == "auth":
-    st.title("🌟 Okuma Dostum'a Hoş Geldin!")
-    u = st.text_input("Adın Soyadın:")
-    s = st.selectbox("Sınıfın:", ["5", "6", "7", "8"])
+    st.title("🌟 Okuma Dostum")
 
-    if st.button("Hadi Başlayalım! 🚀") and u:
-        st.session_state.user = u
-        st.session_state.sinif = s
+    user = st.text_input("Ad Soyad")
+    sinif = st.selectbox("Sınıf", ["5", "6", "7", "8"])
+
+    if st.button("Başla") and user:
+        st.session_state.user = user
+        st.session_state.sinif = sinif
         st.session_state.session_id = str(uuid.uuid4())[:8]
-        st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
+        st.session_state.login_time = datetime.now(
+            ZoneInfo("Europe/Istanbul")
+        ).strftime("%d.%m.%Y %H:%M")
         st.session_state.phase = "setup"
         st.rerun()
 
 # =========================================================
-# 2) KURULUM
+# 2) METİN YÜKLE
 # =========================================================
 elif st.session_state.phase == "setup":
-    st.subheader("Okuyacağımız Metni Hazırlayalım")
-    m_id = st.text_input("Metin ID:", "Metin_1")
-    up = st.file_uploader("Metni PDF olarak yükle", type="pdf")
-    txt = st.text_area("Veya metni buraya kopyala")
+    st.header("📄 Metin Yükle")
 
-    if st.button("Metni Hazırla ✨") and (up or txt):
+    metin_id = st.text_input("Metin ID", "Metin_1")
+    up = st.file_uploader("PDF yükle", type="pdf")
+    txt = st.text_area("Veya metni yapıştır")
+
+    if st.button("Hazırla") and (up or txt):
         raw = txt.strip()
 
         if up:
             reader = PdfReader(up)
-            parts = []
-            for p in reader.pages:
-                t = p.extract_text()
-                if t:
-                    parts.append(t)
-            raw = "\n".join(parts).strip()
+            raw = "\n".join([p.extract_text() or "" for p in reader.pages])
 
-        if not raw:
-            st.error("Metin boş görünüyor. PDF metin çıkarılamamış olabilir.")
-            st.stop()
+        prompt = """
+        Metni sadeleştir ve 6 soru üret.
+        JSON format:
+        {
+          "sade_metin": "...",
+          "sorular": [
+            {"kok":"...","A":"...","B":"...","C":"...","dogru":"A","ipucu":"..."}
+          ]
+        }
+        """
 
-        with st.spinner("Metni senin için düzenliyorum..."):
-            prompt = (
-                "ÖÖG uzmanı olarak metni ortaokul öğrencisi için sadeleştir. "
-                "6 soru içeren saf JSON üret. "
-                "Şema: {'sade_metin': '...', 'sorular': "
-                "[{'kok':'...','A':'...','B':'...','C':'...','dogru':'A','tur':'bilgi','ipucu':'...'}]}"
-            )
-
-            resp = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": raw}
-                ],
-                response_format={"type": "json_object"}
-            )
-
-            st.session_state.activity = json.loads(resp.choices[0].message.content)
-            st.session_state.metin_id = m_id
-
-            st.session_state.phase = "read"
-            st.session_state.q_idx = 0
-            st.session_state.correct_map = {}
-            st.session_state.hints = 0
-            st.session_state.start_t = time.time()
-            st.rerun()
-
-# =========================================================
-# 3) OKUMA VE SOHBET
-# =========================================================
-elif st.session_state.phase == "read":
-    act = st.session_state.activity
-    metin = act.get("sade_metin") or act.get("metin") or "Metin içeriği alınamadı."
-
-    st.markdown(f"<div class='highlight-box'>{metin}</div>", unsafe_allow_html=True)
-
-    c1, c2 = st.columns([2, 5])
-    with c1:
-        if st.button("🔊 Sesli Dinle"):
-            st.audio(get_audio(metin), format="audio/mp3")
-
-    st.divider()
-    st.subheader("💬 Okuma Dostu'na Soru Sor")
-
-    user_q = st.chat_input("Metinde anlamadığın bir yer var mı?")
-    if user_q:
-        ai_resp = client.chat.completions.create(
+        resp = client.chat.completions.create(
             model="gpt-4o",
             messages=[
-                {"role": "system", "content": f"Sen ÖÖG öğretmenisin. Şu metne göre yardım et: {metin}"},
-                {"role": "user", "content": user_q}
-            ]
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": raw}
+            ],
+            response_format={"type": "json_object"}
         )
-        st.session_state.chat_history.append({"q": user_q, "a": ai_resp.choices[0].message.content})
 
-    for chat in st.session_state.chat_history:
-        st.chat_message("user").write(chat["q"])
-        st.chat_message("assistant").write(chat["a"])
-
-    if st.button("Sorulara Geç ➔"):
+        st.session_state.activity = json.loads(
+            resp.choices[0].message.content
+        )
+        st.session_state.metin_id = metin_id
+        st.session_state.q_idx = 0
+        st.session_state.correct = 0
+        st.session_state.start_t = time.time()
         st.session_state.phase = "questions"
         st.rerun()
 
 # =========================================================
-# 4) SORULAR
+# 3) SORULAR
 # =========================================================
 elif st.session_state.phase == "questions":
     act = st.session_state.activity
-    sorular = act.get("sorular", [])
+    sorular = act["sorular"]
     i = st.session_state.q_idx
-
-    # güvenlik: sorular gelmediyse
-    if not sorular:
-        st.error("Sorular bulunamadı. Üretilen JSON içinde 'sorular' alanı yok.")
-        if DEBUG:
-            st.write("activity:", act)
-        st.stop()
 
     if i < len(sorular):
         q = sorular[i]
-        st.subheader(f"Soru {i+1} / {len(sorular)}")
-        st.markdown(f"<div style='font-size:24px; margin-bottom:20px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
+        st.subheader(f"Soru {i+1}")
 
-        # Seçenekler
+        st.write(q["kok"])
+
         for opt in ["A", "B", "C"]:
-            if st.button(f"{opt}) {q.get(opt,'')}", key=f"q_{i}_{opt}"):
-                if opt == q.get("dogru"):
-                    st.session_state.correct_map[i] = 1
-                    st.success("🌟 Doğru!")
-                    time.sleep(0.6)
-                    st.session_state.q_idx += 1
-                    st.rerun()
-                else:
-                    st.session_state.correct_map[i] = 0
-                    st.error("Tekrar dene!")
-
-        if st.button("💡 İpucu Al", key=f"hint_{i}"):
-            st.session_state.hints += 1
-            st.warning(q.get("ipucu", "Metne bakabilirsin!"))
+            if st.button(f"{opt}) {q[opt]}"):
+                if opt == q["dogru"]:
+                    st.session_state.correct += 1
+                st.session_state.q_idx += 1
+                st.rerun()
 
     else:
-        # KAYIT BLOĞU
-        if DEBUG:
-            st.warning("✅ KAYIT BLOĞUNA GELDİM (debug)")
-            st.write("q_idx:", st.session_state.q_idx, "len(sorular):", len(sorular))
-            st.write("correct_map:", st.session_state.correct_map)
+        st.warning("🟡 KAYIT AŞAMASINA GELDİ")
 
-        dogru = sum(st.session_state.correct_map.values())
         sure = round((time.time() - st.session_state.start_t) / 60, 2)
 
-        # A-O (15 sütun)
         row = [
-            st.session_state.session_id,    # A: OturumID
-            st.session_state.user,          # B: Kullanici
-            st.session_state.login_time,    # C: TarihSaat
-            sure,                           # D: SureDakika
-            st.session_state.sinif,         # E: SinifDuzeyi
-            f"%{round(dogru/6*100, 1)}",    # F: BasariYuzde
-            6,                              # G: ToplamSoru
-            dogru,                          # H: DogruSayi
-            "Analiz",                       # I: HataliKazanim
-            st.session_state.metin_id,      # J: MetinID
-            st.session_state.hints,         # K: ToplamIpucu
-            "Evet", "Evet", 0, 0            # L-O
+            st.session_state.session_id,
+            st.session_state.user,
+            st.session_state.login_time,
+            sure,
+            st.session_state.sinif,
+            f"%{round(st.session_state.correct/6*100,1)}",
+            6,
+            st.session_state.correct,
+            "Analiz",
+            st.session_state.metin_id,
+            0,
+            "Evet",
+            "Evet",
+            0,
+            0
         ]
 
-        if DEBUG:
-            st.write("📌 Yazılacak row:", row)
+        st.write("📌 Yazılacak satır:", row)
 
-        if save_to_sheets(row):
+        try:
+            test_sheets()
+            st.success("🎉 KAYIT TAMAM")
             st.session_state.phase = "done"
             st.rerun()
+        except Exception:
+            st.error("❌ KAYIT HATASI")
+            st.code(traceback.format_exc())
 
 # =========================================================
-# 5) BİTTİ
+# 4) BİTTİ
 # =========================================================
 elif st.session_state.phase == "done":
     st.balloons()
-    st.success("Bugünkü çalışman kaydedildi!")
-
-    if st.button("Yeni Metin"):
-        st.session_state.phase = "setup"
-        st.session_state.chat_history = []
+    st.success("Bitti 🎉")
+    if st.button("Yeniden"):
+        st.session_state.clear()
         st.rerun()
