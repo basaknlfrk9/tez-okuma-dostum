@@ -296,4 +296,3 @@ elif st.session_state.phase == "done":
         if st.button("Çıkış"):
             st.session_state.clear()
             st.rerun()
-
