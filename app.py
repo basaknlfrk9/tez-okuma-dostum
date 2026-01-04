@@ -14,36 +14,32 @@ from io import BytesIO
 # =========================================================
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
-# --- Tasarım ---
+# ---------- Tasarım ----------
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&display=swap');
-    html, body, [class*="css"] { font-family: 'Lexend', sans-serif; font-size: 20px; }
-    .stButton button {
-        width: 100%;
-        border-radius: 18px;
-        height: 3.0em;
-        font-weight: 600;
-        font-size: 20px !important;
-        transition: 0.2s;
-        border: 2px solid #eee;
-        background-color: #3498db;
-        color: white;
-    }
-    .highlight-box {
-        background-color: #ffffff;
-        padding: 26px;
-        border-radius: 22px;
-        box-shadow: 0 10px 20px rgba(0,0,0,0.08);
-        border-left: 12px solid #f1c40f;
-        font-size: 22px !important;
-        line-height: 1.9 !important;
-        margin-bottom: 18px;
-    }
-    .small-note {
-        color: #666;
-        font-size: 16px;
-    }
+  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&display=swap');
+  html, body, [class*="css"] { font-family: 'Lexend', sans-serif; font-size: 20px; }
+  .stButton button {
+    width: 100%;
+    border-radius: 18px;
+    height: 3.0em;
+    font-weight: 600;
+    font-size: 20px !important;
+    border: 2px solid #eee;
+    background-color: #3498db;
+    color: white;
+  }
+  .highlight-box {
+    background-color: #ffffff;
+    padding: 26px;
+    border-radius: 22px;
+    box-shadow: 0 10px 20px rgba(0,0,0,0.08);
+    border-left: 12px solid #f1c40f;
+    font-size: 22px !important;
+    line-height: 1.9 !important;
+    margin-bottom: 18px;
+  }
+  .small-note { color:#666; font-size:16px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -53,10 +49,10 @@ st.markdown("""
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # =========================================================
-# GOOGLE SHEETS (STABİL)
+# GOOGLE SHEETS (STABİL + SEKME ADI ESNEK)
 # =========================================================
 @st.cache_resource
-def get_ws():
+def get_client():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -67,13 +63,24 @@ def get_ws():
         info["private_key"] = pk.replace("\\n", "\n")
 
     creds = Credentials.from_service_account_info(info, scopes=scope)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_url(st.secrets["GSHEET_URL"])
-    return sh.worksheet("Performans")
+    return gspread.authorize(creds)
 
-def save_to_sheets(row):
+@st.cache_resource
+def get_spreadsheet():
+    gc = get_client()
+    return gc.open_by_url(st.secrets["GSHEET_URL"])
+
+def get_ws(sheet_name: str):
+    sh = get_spreadsheet()
+    wanted = sheet_name.strip().lower()
+    for w in sh.worksheets():
+        if w.title.strip().lower() == wanted:
+            return w
+    raise ValueError(f"Sheet sekmesi bulunamadı: '{sheet_name}'. Mevcut sekmeler: {[w.title for w in sh.worksheets()]}")
+
+def save_to_sheets(row, sheet_name="Performans"):
     try:
-        ws = get_ws()
+        ws = get_ws(sheet_name)
         ws.append_row(row, value_input_option="USER_ENTERED")
         return True
     except Exception:
@@ -97,9 +104,10 @@ def get_audio(text):
 # =========================================================
 if "phase" not in st.session_state: st.session_state.phase = "auth"
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
-if "saved" not in st.session_state: st.session_state.saved = False  # çift kayıt önler
+if "saved_perf" not in st.session_state: st.session_state.saved_perf = False  # performans çift kayıt önler
+if "saved_login" not in st.session_state: st.session_state.saved_login = False  # login çift kayıt önler
 
-# Global çıkış butonu (auth dışında)
+# Global çıkış (auth dışında)
 if st.session_state.phase != "auth":
     col_a, col_b = st.columns([9, 1])
     with col_b:
@@ -120,13 +128,28 @@ if st.session_state.phase == "auth":
         st.session_state.sinif = s
         st.session_state.session_id = str(uuid.uuid4())[:8]
         st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
-        st.session_state.phase = "setup"
+
         st.session_state.chat_history = []
-        st.session_state.saved = False
+        st.session_state.saved_perf = False
+        st.session_state.saved_login = False
+
+        # ✅ LOGIN KAYDI -> "Sohbet" sekmesine
+        # Not: "Sohbet" sekmen yoksa sheet_name'i mevcut sekme adına göre değiştir.
+        login_row = [
+            st.session_state.session_id,   # OturumID
+            st.session_state.user,         # Kullanici
+            st.session_state.login_time,   # TarihSaat
+            st.session_state.sinif,        # Sinif
+            "LOGIN"                        # Event
+        ]
+        save_to_sheets(login_row, sheet_name="Sohbet")
+        st.session_state.saved_login = True
+
+        st.session_state.phase = "setup"
         st.rerun()
 
 # =========================================================
-# 2) KURULUM (PDF / metin)
+# 2) KURULUM
 # =========================================================
 elif st.session_state.phase == "setup":
     st.subheader("📄 Okuyacağımız Metni Hazırlayalım")
@@ -136,7 +159,6 @@ elif st.session_state.phase == "setup":
 
     if st.button("Metni Hazırla ✨") and (up or txt):
         raw = (txt or "").strip()
-
         if up:
             reader = PdfReader(up)
             parts = []
@@ -173,7 +195,7 @@ elif st.session_state.phase == "setup":
             st.session_state.correct_map = {}
             st.session_state.hints = 0
             st.session_state.start_t = time.time()
-            st.session_state.saved = False
+            st.session_state.saved_perf = False
             st.rerun()
 
 # =========================================================
@@ -204,6 +226,10 @@ elif st.session_state.phase == "read":
         )
         st.session_state.chat_history.append({"q": user_q, "a": ai_resp.choices[0].message.content})
 
+        # ✅ İstersen sohbet logu da yazalım (opsiyonel)
+        # chat_row = [st.session_state.session_id, st.session_state.user, datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M"), user_q]
+        # save_to_sheets(chat_row, sheet_name="Sohbet")
+
     for chat in st.session_state.chat_history:
         st.chat_message("user").write(chat["q"])
         st.chat_message("assistant").write(chat["a"])
@@ -229,13 +255,12 @@ elif st.session_state.phase == "questions":
         st.subheader(f"Soru {i+1} / {len(sorular)}")
         st.markdown(f"<div style='font-size:22px; margin-bottom:14px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
 
-        # seçenekler
         for opt in ["A", "B", "C"]:
             if st.button(f"{opt}) {q.get(opt,'')}", key=f"q_{i}_{opt}"):
                 if opt == q.get("dogru"):
                     st.session_state.correct_map[i] = 1
                     st.success("🌟 Doğru!")
-                    time.sleep(0.4)
+                    time.sleep(0.35)
                     st.session_state.q_idx += 1
                     st.rerun()
                 else:
@@ -249,29 +274,33 @@ elif st.session_state.phase == "questions":
         st.markdown("<div class='small-note'>Not: İstersen çıkış yapıp sonra tekrar başlayabilirsin.</div>", unsafe_allow_html=True)
 
     else:
-        # --- KAYIT ---
-        if not st.session_state.saved:
+        # ✅ PERFORMANS KAYDI (Sorular bitince)
+        if not st.session_state.saved_perf:
             dogru = sum(st.session_state.correct_map.values())
             sure = round((time.time() - st.session_state.start_t) / 60, 2)
 
+            # Hatalı soruların özeti
+            wrongs = [str(idx + 1) for idx, v in st.session_state.correct_map.items() if v == 0]
+            hatali = "Yanlış: " + ",".join(wrongs) if wrongs else "Hepsi doğru"
+
             row = [
-                st.session_state.session_id,                 # A
-                st.session_state.user,                       # B
-                st.session_state.login_time,                 # C
-                sure,                                        # D
-                st.session_state.sinif,                      # E
-                f"%{round(dogru/6*100, 1)}",                 # F
-                6,                                           # G
-                dogru,                                       # H
-                "Analiz",                                    # I
-                st.session_state.metin_id,                   # J
-                st.session_state.hints,                      # K
+                st.session_state.session_id,                 # A OturumID
+                st.session_state.user,                       # B Kullanici
+                st.session_state.login_time,                 # C TarihSaat
+                sure,                                        # D SureDakika
+                st.session_state.sinif,                      # E SinifDuzeyi
+                f"%{round(dogru/6*100, 1)}",                 # F BasariYuzde
+                6,                                           # G ToplamSoru
+                dogru,                                       # H DogruSayi
+                hatali,                                      # I HataliKazanim (özet)
+                st.session_state.metin_id,                   # J MetinID
+                st.session_state.hints,                      # K ToplamIpucu
                 "Evet", "Evet", 0, 0                         # L-O
             ]
 
-            ok = save_to_sheets(row)
+            ok = save_to_sheets(row, sheet_name="Performans")
             if ok:
-                st.session_state.saved = True
+                st.session_state.saved_perf = True
                 st.session_state.phase = "done"
                 st.rerun()
         else:
@@ -290,7 +319,7 @@ elif st.session_state.phase == "done":
         if st.button("Yeni Metin"):
             st.session_state.phase = "setup"
             st.session_state.chat_history = []
-            st.session_state.saved = False
+            st.session_state.saved_perf = False
             st.rerun()
     with c2:
         if st.button("Çıkış"):
