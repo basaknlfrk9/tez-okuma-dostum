@@ -61,7 +61,6 @@ def get_client():
     pk = info.get("private_key", "")
     if isinstance(pk, str) and "\\n" in pk:
         info["private_key"] = pk.replace("\\n", "\n")
-
     creds = Credentials.from_service_account_info(info, scopes=scope)
     return gspread.authorize(creds)
 
@@ -89,6 +88,27 @@ def save_to_sheets(row, sheet_name="Performans"):
         return False
 
 # =========================================================
+# KAYIT KONTROL PANELİ (GEÇİCİ - SORUN ÇÖZÜLÜNCE KALDIR)
+# =========================================================
+with st.expander("🔎 Kayıt Kontrol Paneli (Nereye yazıyorum?)", expanded=True):
+    try:
+        sh = get_spreadsheet()
+        st.write("✅ Spreadsheet adı:", sh.title)
+        st.write("✅ Sekmeler:", [w.title for w in sh.worksheets()])
+        st.write("✅ GSHEET_URL (kısaltılmış):", st.secrets["GSHEET_URL"][:70])
+        st.write("✅ Service account:", st.secrets["GSHEETS"]["client_email"])
+
+        if st.button("🧷 MANUEL LOGIN satırı yaz (Sohbet sekmesine)"):
+            now = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
+            ok = save_to_sheets(["MANUEL_LOGIN", "Basak", now, "5", "LOGIN"], sheet_name="Sohbet")
+            st.success("✅ YAZDI (Sohbet sekmesini kontrol et)" if ok else "❌ YAZMADI")
+    except Exception:
+        st.error("❌ Kontrol paneli hatası:")
+        st.code(traceback.format_exc())
+
+st.divider()
+
+# =========================================================
 # SES (Dinle)
 # =========================================================
 def get_audio(text):
@@ -104,8 +124,8 @@ def get_audio(text):
 # =========================================================
 if "phase" not in st.session_state: st.session_state.phase = "auth"
 if "chat_history" not in st.session_state: st.session_state.chat_history = []
-if "saved_perf" not in st.session_state: st.session_state.saved_perf = False  # performans çift kayıt önler
-if "saved_login" not in st.session_state: st.session_state.saved_login = False  # login çift kayıt önler
+if "saved_perf" not in st.session_state: st.session_state.saved_perf = False
+if "saved_login" not in st.session_state: st.session_state.saved_login = False
 
 # Global çıkış (auth dışında)
 if st.session_state.phase != "auth":
@@ -133,14 +153,13 @@ if st.session_state.phase == "auth":
         st.session_state.saved_perf = False
         st.session_state.saved_login = False
 
-        # ✅ LOGIN KAYDI -> "Sohbet" sekmesine
-        # Not: "Sohbet" sekmen yoksa sheet_name'i mevcut sekme adına göre değiştir.
+        # ✅ LOGIN KAYDI -> Sohbet sekmesi
         login_row = [
-            st.session_state.session_id,   # OturumID
-            st.session_state.user,         # Kullanici
-            st.session_state.login_time,   # TarihSaat
-            st.session_state.sinif,        # Sinif
-            "LOGIN"                        # Event
+            st.session_state.session_id,
+            st.session_state.user,
+            st.session_state.login_time,
+            st.session_state.sinif,
+            "LOGIN"
         ]
         save_to_sheets(login_row, sheet_name="Sohbet")
         st.session_state.saved_login = True
@@ -178,7 +197,6 @@ elif st.session_state.phase == "setup":
                 "6 soru içeren saf JSON üret. "
                 "Şema: {'sade_metin':'...','sorular':[{'kok':'...','A':'...','B':'...','C':'...','dogru':'A','ipucu':'...'}]}"
             )
-
             resp = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
@@ -226,10 +244,6 @@ elif st.session_state.phase == "read":
         )
         st.session_state.chat_history.append({"q": user_q, "a": ai_resp.choices[0].message.content})
 
-        # ✅ İstersen sohbet logu da yazalım (opsiyonel)
-        # chat_row = [st.session_state.session_id, st.session_state.user, datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M"), user_q]
-        # save_to_sheets(chat_row, sheet_name="Sohbet")
-
     for chat in st.session_state.chat_history:
         st.chat_message("user").write(chat["q"])
         st.chat_message("assistant").write(chat["a"])
@@ -274,28 +288,25 @@ elif st.session_state.phase == "questions":
         st.markdown("<div class='small-note'>Not: İstersen çıkış yapıp sonra tekrar başlayabilirsin.</div>", unsafe_allow_html=True)
 
     else:
-        # ✅ PERFORMANS KAYDI (Sorular bitince)
         if not st.session_state.saved_perf:
             dogru = sum(st.session_state.correct_map.values())
             sure = round((time.time() - st.session_state.start_t) / 60, 2)
-
-            # Hatalı soruların özeti
             wrongs = [str(idx + 1) for idx, v in st.session_state.correct_map.items() if v == 0]
             hatali = "Yanlış: " + ",".join(wrongs) if wrongs else "Hepsi doğru"
 
             row = [
-                st.session_state.session_id,                 # A OturumID
-                st.session_state.user,                       # B Kullanici
-                st.session_state.login_time,                 # C TarihSaat
-                sure,                                        # D SureDakika
-                st.session_state.sinif,                      # E SinifDuzeyi
-                f"%{round(dogru/6*100, 1)}",                 # F BasariYuzde
-                6,                                           # G ToplamSoru
-                dogru,                                       # H DogruSayi
-                hatali,                                      # I HataliKazanim (özet)
-                st.session_state.metin_id,                   # J MetinID
-                st.session_state.hints,                      # K ToplamIpucu
-                "Evet", "Evet", 0, 0                         # L-O
+                st.session_state.session_id,
+                st.session_state.user,
+                st.session_state.login_time,
+                sure,
+                st.session_state.sinif,
+                f"%{round(dogru/6*100, 1)}",
+                6,
+                dogru,
+                hatali,
+                st.session_state.metin_id,
+                st.session_state.hints,
+                "Evet", "Evet", 0, 0
             ]
 
             ok = save_to_sheets(row, sheet_name="Performans")
