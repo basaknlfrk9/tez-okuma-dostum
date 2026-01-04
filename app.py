@@ -10,21 +10,26 @@ from gtts import gTTS
 from io import BytesIO
 
 # =========================================================
-# ZORUNLU DEBUG (HER KOŞULDA GÖRÜNÜR)
+# AYARLAR
 # =========================================================
+SHOW_DEBUG_BAR = False   # True yaparsan kırmızı debug bar görünür
+SHOW_SHEETS_TEST = False # True yaparsan test butonu görünür
+
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
-st.error("🔴 DEBUG BAR: BU YAZIYI GÖRMÜYORSAN YANLIŞ DOSYA ÇALIŞIYOR")
-
-st.write("Secrets kontrol:",
-         "OPENAI_API_KEY" in st.secrets,
-         "GSHEET_URL" in st.secrets,
-         "GSHEETS" in st.secrets)
+if SHOW_DEBUG_BAR:
+    st.error("🔴 DEBUG BAR: BU YAZIYI GÖRMÜYORSAN YANLIŞ DOSYA ÇALIŞIYOR")
+    st.write("Secrets kontrol:",
+             "OPENAI_API_KEY" in st.secrets,
+             "GSHEET_URL" in st.secrets,
+             "GSHEETS" in st.secrets)
+    st.divider()
 
 # =========================================================
-# GOOGLE SHEETS TEST (EN ÜSTTE)
+# GOOGLE SHEETS (STABİL)
 # =========================================================
-def test_sheets():
+@st.cache_resource
+def get_ws():
     scope = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -37,25 +42,26 @@ def test_sheets():
     creds = Credentials.from_service_account_info(info, scopes=scope)
     gc = gspread.authorize(creds)
     sh = gc.open_by_url(st.secrets["GSHEET_URL"])
+    return sh.worksheet("Performans")
 
-    st.write("📄 Sheet sekmeleri:", [w.title for w in sh.worksheets()])
+def save_to_sheets(row):
+    ws = get_ws()
+    ws.append_row(row, value_input_option="USER_ENTERED")
+    return True
 
-    ws = sh.worksheet("Performans")
-    ws.append_row(
-        ["TEST", "TEST", "TEST", 0.1, "5", "%0", 6, 0, "Analiz",
-         "Metin_1", 0, "Evet", "Evet", 0, 0],
-        value_input_option="USER_ENTERED"
-    )
-
-if st.button("🧪 GOOGLE SHEETS TEST (1 satır yaz)"):
-    try:
-        test_sheets()
-        st.success("✅ GOOGLE SHEETS YAZDI")
-    except Exception:
-        st.error("❌ GOOGLE SHEETS HATASI (TAM)")
-        st.code(traceback.format_exc())
-
-st.divider()
+# İsteğe bağlı: TEST butonu
+if SHOW_SHEETS_TEST:
+    if st.button("🧪 GOOGLE SHEETS TEST (1 satır yaz)"):
+        try:
+            save_to_sheets(
+                ["TEST", "TEST", "TEST", 0.1, "5", "%0", 6, 0, "Analiz",
+                 "Metin_1", 0, "Evet", "Evet", 0, 0]
+            )
+            st.success("✅ GOOGLE SHEETS YAZDI")
+        except Exception:
+            st.error("❌ GOOGLE SHEETS HATASI (TAM)")
+            st.code(traceback.format_exc())
+    st.divider()
 
 # =========================================================
 # OPENAI
@@ -102,18 +108,22 @@ elif st.session_state.phase == "setup":
 
         if up:
             reader = PdfReader(up)
-            raw = "\n".join([p.extract_text() or "" for p in reader.pages])
+            raw = "\n".join([p.extract_text() or "" for p in reader.pages]).strip()
+
+        if not raw:
+            st.error("Metin boş görünüyor. PDF'den metin çıkarılamamış olabilir.")
+            st.stop()
 
         prompt = """
-        Metni sadeleştir ve 6 soru üret.
-        JSON format:
-        {
-          "sade_metin": "...",
-          "sorular": [
-            {"kok":"...","A":"...","B":"...","C":"...","dogru":"A","ipucu":"..."}
-          ]
-        }
-        """
+Metni sadeleştir ve 6 soru üret.
+JSON format:
+{
+  "sade_metin": "...",
+  "sorular": [
+    {"kok":"...","A":"...","B":"...","C":"...","dogru":"A","ipucu":"..."}
+  ]
+}
+"""
 
         resp = client.chat.completions.create(
             model="gpt-4o",
@@ -124,9 +134,7 @@ elif st.session_state.phase == "setup":
             response_format={"type": "json_object"}
         )
 
-        st.session_state.activity = json.loads(
-            resp.choices[0].message.content
-        )
+        st.session_state.activity = json.loads(resp.choices[0].message.content)
         st.session_state.metin_id = metin_id
         st.session_state.q_idx = 0
         st.session_state.correct = 0
@@ -139,18 +147,22 @@ elif st.session_state.phase == "setup":
 # =========================================================
 elif st.session_state.phase == "questions":
     act = st.session_state.activity
-    sorular = act["sorular"]
+    sorular = act.get("sorular", [])
     i = st.session_state.q_idx
+
+    if not sorular:
+        st.error("Sorular bulunamadı. JSON içinde 'sorular' alanı yok.")
+        st.write(act)
+        st.stop()
 
     if i < len(sorular):
         q = sorular[i]
-        st.subheader(f"Soru {i+1}")
-
-        st.write(q["kok"])
+        st.subheader(f"Soru {i+1} / {len(sorular)}")
+        st.write(q.get("kok", ""))
 
         for opt in ["A", "B", "C"]:
-            if st.button(f"{opt}) {q[opt]}"):
-                if opt == q["dogru"]:
+            if st.button(f"{opt}) {q.get(opt,'')}"):
+                if opt == q.get("dogru"):
                     st.session_state.correct += 1
                 st.session_state.q_idx += 1
                 st.rerun()
@@ -161,27 +173,28 @@ elif st.session_state.phase == "questions":
         sure = round((time.time() - st.session_state.start_t) / 60, 2)
 
         row = [
-            st.session_state.session_id,
-            st.session_state.user,
-            st.session_state.login_time,
-            sure,
-            st.session_state.sinif,
-            f"%{round(st.session_state.correct/6*100,1)}",
-            6,
-            st.session_state.correct,
-            "Analiz",
-            st.session_state.metin_id,
-            0,
-            "Evet",
-            "Evet",
-            0,
-            0
+            st.session_state.session_id,                  # A
+            st.session_state.user,                        # B
+            st.session_state.login_time,                  # C
+            sure,                                         # D
+            st.session_state.sinif,                       # E
+            f"%{round(st.session_state.correct/6*100,1)}",# F
+            6,                                            # G
+            st.session_state.correct,                     # H
+            "Analiz",                                     # I
+            st.session_state.metin_id,                    # J
+            0,                                            # K (ipucu yoksa 0)
+            "Evet",                                       # L
+            "Evet",                                       # M
+            0,                                            # N
+            0                                             # O
         ]
 
+        # İstersen kullanıcıya göstermeyi kapatabilirsin
         st.write("📌 Yazılacak satır:", row)
 
         try:
-            test_sheets()
+            save_to_sheets(row)   # ✅ ARTIK GERÇEK VERİYİ YAZAR
             st.success("🎉 KAYIT TAMAM")
             st.session_state.phase = "done"
             st.rerun()
