@@ -151,15 +151,6 @@ def split_paragraphs(text: str):
 # STORY MAP — AI RUBRİK PUANLAMA
 # =========================================================
 def ai_score_story_map(metin: str, sm: dict, grade: str):
-    """
-    Metne göre öykü haritasını 0/1/2 rubriğiyle puanlar.
-    Çıktı JSON:
-    {
-      "scores": {"kahraman":2,"mekan":1,"zaman":0,"problem":2,"olaylar":1,"cozum":2},
-      "total": 8,
-      "reason": "Kısa gerekçe..."
-    }
-    """
     metin_short = (metin or "")[:2500]
 
     rubrik = """
@@ -261,7 +252,6 @@ if "important_notes" not in st.session_state: st.session_state.important_notes =
 if "prior_knowledge" not in st.session_state: st.session_state.prior_knowledge = ""
 if "summary" not in st.session_state: st.session_state.summary = ""
 
-# Story map
 if "story_map" not in st.session_state:
     st.session_state.story_map = {"kahraman":"", "mekan":"", "zaman":"", "problem":"", "olaylar":"", "cozum":""}
 if "story_map_saved" not in st.session_state:
@@ -271,10 +261,10 @@ if "story_map_ai_scored" not in st.session_state:
 
 # --- YENİ: Soru geçme + ipucu etkisi raporu için state ---
 if "skipped" not in st.session_state: st.session_state.skipped = []
-if "hints_used_by_q" not in st.session_state: st.session_state.hints_used_by_q = {}  # {q_idx: True}
+if "hints_used_by_q" not in st.session_state: st.session_state.hints_used_by_q = {}
 if "correct_no_hint" not in st.session_state: st.session_state.correct_no_hint = 0
 if "correct_with_hint" not in st.session_state: st.session_state.correct_with_hint = 0
-if "question_attempts" not in st.session_state: st.session_state.question_attempts = {}  # {q_idx: attempts}
+if "question_attempts" not in st.session_state: st.session_state.question_attempts = {}
 if "story_map_last_scores" not in st.session_state: st.session_state.story_map_last_scores = {}
 if "story_map_last_total" not in st.session_state: st.session_state.story_map_last_total = None
 if "story_map_last_reason" not in st.session_state: st.session_state.story_map_last_reason = ""
@@ -317,7 +307,6 @@ if st.session_state.phase == "auth":
         st.session_state.story_map_saved = False
         st.session_state.story_map_ai_scored = False
 
-        # yeni resetler
         st.session_state.skipped = []
         st.session_state.hints_used_by_q = {}
         st.session_state.correct_no_hint = 0
@@ -382,7 +371,6 @@ elif st.session_state.phase == "setup":
 
         with st.spinner("Metni düzenliyorum..."):
             resp = openai_json_request(prompt, raw, model="gpt-4o-mini")
-            # JSON güvenliği (ufak koruma)
             try:
                 st.session_state.activity = json.loads(resp.choices[0].message.content)
             except Exception:
@@ -413,7 +401,6 @@ elif st.session_state.phase == "setup":
         st.session_state.story_map_saved = False
         st.session_state.story_map_ai_scored = False
 
-        # yeni resetler
         st.session_state.skipped = []
         st.session_state.hints_used_by_q = {}
         st.session_state.correct_no_hint = 0
@@ -467,7 +454,6 @@ elif st.session_state.phase == "during":
     paras = st.session_state.get("paragraphs", split_paragraphs(metin))
     p_idx = st.session_state.get("p_idx", 0)
 
-    # --- YENİ: sadece aktif paragrafı seslendir ---
     c1, c2 = st.columns([2, 5])
     with c1:
         if st.button("🔊 Bu paragrafı dinle"):
@@ -521,7 +507,7 @@ elif st.session_state.phase == "during":
             st.rerun()
 
 # =========================================================
-# 5) POST-READING (ÖZET + ÖYKÜ HARİTASI + AI PUANLAMA)
+# 5) POST-READING
 # =========================================================
 elif st.session_state.phase == "post":
     st.subheader("🟧 Okuma Sonrası (POST-READING)")
@@ -627,17 +613,15 @@ elif st.session_state.phase == "questions":
         st.error("Sorular bulunamadı. JSON içinde 'sorular' alanı yok.")
         st.stop()
 
-    # sorular bitti mi?
     if i < len(sorular):
         q = sorular[i]
         st.subheader(f"Soru {i+1} / {len(sorular)}")
-        tur = q.get("tur", "")
-        if tur:
-            st.markdown(f"<div class='small-note'>Soru türü: <b>{tur}</b></div>", unsafe_allow_html=True)
+
+        # --- KALDIRILDI: "Soru türü" satırı (UI'da gösterilmiyor) ---
+        tur = q.get("tur", "")  # log amaçlı kalsın
 
         st.markdown(f"<div style='font-size:22px; margin-bottom:14px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
 
-        # --- YENİ: Geç butonu ---
         colg1, colg2 = st.columns([2, 1])
         with colg1:
             st.markdown("<div class='small-note'>İstersen bu soruyu geçip en sonda geri dönebilirsin.</div>", unsafe_allow_html=True)
@@ -649,11 +633,8 @@ elif st.session_state.phase == "questions":
                 st.session_state.q_idx += 1
                 st.rerun()
 
-        # seçenekler
         for opt in ["A", "B", "C"]:
             if st.button(f"{opt}) {q.get(opt,'')}", key=f"q_{i}_{opt}"):
-
-                # attempts say
                 st.session_state.question_attempts[i] = st.session_state.question_attempts.get(i, 0) + 1
 
                 is_correct = (opt == q.get("dogru"))
@@ -667,13 +648,11 @@ elif st.session_state.phase == "questions":
                 }, ensure_ascii=False))
 
                 if is_correct:
-                    # --- YENİ: ipucusuz / ipuculu doğru ayrımı ---
                     if st.session_state.hints_used_by_q.get(i, False):
                         st.session_state.correct_with_hint += 1
                     else:
                         st.session_state.correct_no_hint += 1
 
-                    # doğruysa ve daha önce skip listesine eklenmişse çıkar
                     if i in st.session_state.skipped:
                         st.session_state.skipped = [x for x in st.session_state.skipped if x != i]
 
@@ -684,7 +663,6 @@ elif st.session_state.phase == "questions":
                 else:
                     st.error("Tekrar dene!")
 
-        # ipucu
         if st.button("💡 İpucu Al", key=f"hint_{i}"):
             st.session_state.hints += 1
             st.session_state.hints_used_by_q[i] = True
@@ -692,7 +670,6 @@ elif st.session_state.phase == "questions":
             st.warning(q.get("ipucu", "Metne tekrar bakabilirsin!"))
 
     else:
-        # --- YENİ: Geçilen sorular varsa önce geri dönüş akışı ---
         if st.session_state.skipped:
             st.warning(f"{len(st.session_state.skipped)} soruyu geçtin. İstersen şimdi geri dönelim.")
             colr1, colr2 = st.columns(2)
@@ -702,11 +679,9 @@ elif st.session_state.phase == "questions":
                     st.rerun()
             with colr2:
                 if st.button("✅ Geçtiklerim kalsın, bitir"):
-                    # performans kaydına geç
                     st.session_state.skipped = []
                     st.rerun()
         else:
-            # performansı bir kez kaydet
             if not st.session_state.saved_perf:
                 dogru = sum(st.session_state.correct_map.values())
                 sure = round((time.time() - st.session_state.start_t) / 60, 2)
@@ -740,11 +715,7 @@ elif st.session_state.phase == "done":
     st.balloons()
     st.success("✅ Bugünkü çalışman kaydedildi!")
 
-    # --- YENİ: RAPOR ---
-    # süreyi tekrar hesaplayalım (görüntü için)
     sure = round((time.time() - st.session_state.get("start_t", time.time())) / 60, 2)
-
-    # soru metrikleri
     total_q = 6
     dogru = sum(st.session_state.get("correct_map", {}).values())
     ipucu_toplam = st.session_state.get("hints", 0)
@@ -752,7 +723,6 @@ elif st.session_state.phase == "done":
     ipuculu_dogru = st.session_state.get("correct_with_hint", 0)
     tekrar = st.session_state.get("repeat_count", 0)
 
-    # story map
     sm_filled = st.session_state.get("story_map_filled", 0)
     sm_total = st.session_state.get("story_map_last_total", None)
 
@@ -791,7 +761,6 @@ elif st.session_state.phase == "done":
             st.session_state.story_map_saved = False
             st.session_state.story_map_ai_scored = False
 
-            # yeni resetler
             st.session_state.skipped = []
             st.session_state.hints_used_by_q = {}
             st.session_state.correct_no_hint = 0
