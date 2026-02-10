@@ -1,8 +1,8 @@
 import streamlit as st
-from datetime import datetime
-from zoneinfo import ZoneInfo
 import gspread
 from google.oauth2.service_account import Credentials
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from openai import OpenAI
 from openai import RateLimitError, APIError, APITimeoutError
 import json, uuid, time, re, random, traceback
@@ -10,11 +10,9 @@ from gtts import gTTS
 from io import BytesIO
 
 # =========================================================
-# OKUMA DOSTUM — STRATEJİ TEMELLİ OKUMA (ÖÖG)
-# PRE / DURING / POST + STORY MAP + AI RUBRİK + SHEETS
-# Metin & Sorular: Google Sheets bankasından çekilir
-# SoruBankasi'nda tur/ipucu yok
-# MetinBankasi'nda baslik + pre_ipucu var (PRE'de gösterilir)
+# OKUMA DOSTUM — BANKA SÜRÜMÜ (METİN + SORU SHEETS'TEN)
+# MetinBankasi: metin_id | sinif | metin | baslik | pre_ipucu
+# SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | dogru
 # =========================================================
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
@@ -40,7 +38,48 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# OPENAI (Sadece Story Map puanı + metinle ilgili sohbet için)
+# HELPERS
+# =========================================================
+def _norm(x) -> str:
+    return str(x or "").strip()
+
+def now_tr() -> str:
+    return datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
+
+def split_paragraphs(text: str):
+    text = (text or "").replace("\r", "\n").strip()
+    if not text:
+        return []
+    parts = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if len(parts) <= 1:
+        parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
+        if len(parts) > 8:
+            chunks, buf = [], ""
+            for s in parts:
+                if len(buf) < 260:
+                    buf = (buf + " " + s).strip()
+                else:
+                    chunks.append(buf)
+                    buf = s
+            if buf:
+                chunks.append(buf)
+            parts = chunks
+    return parts
+
+def get_audio(text: str):
+    clean = re.sub(r"[*#_]", "", (text or ""))[:1000]
+    try:
+        tts = gTTS(text=clean, lang="tr")
+        fp = BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        return fp
+    except Exception:
+        st.error("❌ Ses oluşturulamadı. Lütfen tekrar deneyin.")
+        return None
+
+# =========================================================
+# OPENAI
 # =========================================================
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -49,18 +88,15 @@ def openai_json_request(system_prompt, user_text, model="gpt-4o-mini", max_retri
         try:
             return client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_text},
-                ],
+                messages=[{"role": "system", "content": system_prompt},
+                          {"role": "user", "content": user_text}],
                 response_format={"type": "json_object"},
             )
         except (RateLimitError, APIError, APITimeoutError):
             wait = min(2 ** attempt, 20) + random.uniform(0, 1.0)
             st.warning(f"⚠️ Yoğunluk var, tekrar deneniyor... ({attempt+1}/{max_retries})")
             time.sleep(wait)
-
-    st.error("❌ OpenAI yoğunluğu çok fazla. 30 sn sonra tekrar deneyin.")
+    st.error("❌ OpenAI yoğunluğu çok fazla. Biraz sonra tekrar deneyin.")
     st.stop()
 
 # =========================================================
@@ -94,38 +130,32 @@ def get_ws(sheet_name: str):
             return w
     raise ValueError(f"Sheet sekmesi bulunamadı: '{sheet_name}'. Mevcut: {[w.title for w in sh.worksheets()]}")
 
-def save_to_sheets(row, sheet_name="Performans"):
+def append_row_safe(sheet_name: str, row):
     try:
         ws = get_ws(sheet_name)
         ws.append_row(row, value_input_option="USER_ENTERED")
         return True
     except Exception:
-        st.error(f"❌ Veri Kayıt Hatası ({sheet_name}) (tam):")
+        st.error(f"❌ Sheets yazma hatası ({sheet_name})")
         st.code(traceback.format_exc())
         return False
 
-def log_chat(event, payload):
+def log_chat(event: str, payload):
     try:
-        ts = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
         row = [
             st.session_state.get("session_id", ""),
             st.session_state.get("user", ""),
-            ts,
+            now_tr(),
             event,
             payload[:45000] if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)[:45000],
         ]
-        save_to_sheets(row, sheet_name="Sohbet")
+        append_row_safe("Sohbet", row)
     except Exception:
         pass
 
 # =========================================================
-# BANKA: MetinBankasi + SoruBankasi
-# MetinBankasi: metin_id | sinif | metin | baslik | pre_ipucu
-# SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | dogru
+# BANKA OKUMA
 # =========================================================
-def _norm(s):
-    return str(s or "").strip()
-
 def list_metin_ids_for_sinif(sinif: str):
     ws = get_ws("MetinBankasi")
     rows = ws.get_all_records()
@@ -136,43 +166,43 @@ def list_metin_ids_for_sinif(sinif: str):
     return sorted(list(set(ids)))
 
 def load_activity_from_bank(metin_id: str, sinif: str):
-    # MetinBankasi
+    # Metin
     ws_m = get_ws("MetinBankasi")
     mrows = ws_m.get_all_records()
-    m = [r for r in mrows if _norm(r.get("metin_id")) == _norm(metin_id) and _norm(r.get("sinif")) == _norm(sinif)]
-    if not m:
+    match_m = [r for r in mrows if _norm(r.get("metin_id")) == _norm(metin_id) and _norm(r.get("sinif")) == _norm(sinif)]
+    if not match_m:
         return None, "MetinBankasi'nda bu metin_id + sınıf bulunamadı."
 
-    metin = _norm(m[0].get("metin"))
+    metin = _norm(match_m[0].get("metin"))
+    baslik = _norm(match_m[0].get("baslik"))
+    pre_ipucu = _norm(match_m[0].get("pre_ipucu"))
+
     if not metin:
         return None, "MetinBankasi'nda metin alanı boş."
 
-    baslik = _norm(m[0].get("baslik"))
-    pre_ipucu = _norm(m[0].get("pre_ipucu"))
-
-    # SoruBankasi
+    # Sorular
     ws_q = get_ws("SoruBankasi")
     qrows = ws_q.get_all_records()
-    qs = [r for r in qrows if _norm(r.get("metin_id")) == _norm(metin_id) and _norm(r.get("sinif")) == _norm(sinif)]
-    if not qs:
+    match_q = [r for r in qrows if _norm(r.get("metin_id")) == _norm(metin_id) and _norm(r.get("sinif")) == _norm(sinif)]
+    if not match_q:
         return None, "SoruBankasi'nda bu metin_id + sınıf için soru bulunamadı."
 
-    def qno(x):
+    def qno(r):
         try:
-            return int(str(x.get("soru_no", "0")).strip() or 0)
-        except:
+            return int(str(r.get("soru_no", "")).strip())
+        except Exception:
             return 0
 
-    qs = sorted(qs, key=qno)
+    match_q = sorted(match_q, key=qno)
 
     sorular = []
-    for r in qs:
+    for r in match_q:
         q = {
             "kok": _norm(r.get("kok")),
             "A": _norm(r.get("A")),
             "B": _norm(r.get("B")),
             "C": _norm(r.get("C")),
-            "dogru": _norm(r.get("dogru")) or "A",
+            "dogru": _norm(r.get("dogru")).upper() or "A",
         }
         if q["dogru"] not in ["A", "B", "C"]:
             q["dogru"] = "A"
@@ -184,67 +214,33 @@ def load_activity_from_bank(metin_id: str, sinif: str):
     return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular}, ""
 
 # =========================================================
-# SES
-# =========================================================
-def get_audio(text):
-    clean = re.sub(r"[*#_]", "", text)[:1000]
-    try:
-        tts = gTTS(text=clean, lang="tr")
-        fp = BytesIO()
-        tts.write_to_fp(fp)
-        fp.seek(0)
-        return fp
-    except Exception:
-        st.error("❌ Ses oluşturulamadı. Lütfen tekrar deneyin.")
-        return None
-
-def split_paragraphs(text: str):
-    text = text.replace("\r", "\n")
-    parts = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    if len(parts) <= 1:
-        parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", text) if p.strip()]
-        if len(parts) > 8:
-            chunks, buf = [], ""
-            for s in parts:
-                if len(buf) < 260:
-                    buf = (buf + " " + s).strip()
-                else:
-                    chunks.append(buf); buf = s
-            if buf: chunks.append(buf)
-            parts = chunks
-    return parts
-
-# =========================================================
-# STORY MAP — AI RUBRİK
+# STORY MAP AI
 # =========================================================
 def ai_score_story_map(metin: str, sm: dict, grade: str):
     metin_short = (metin or "")[:2500]
     sm_safe = {k: (v or "")[:600] for k, v in (sm or {}).items()}
 
     rubrik = """
-    Rubrik (0-2):
-    0 = boş / alakasız / metinle uyuşmuyor
-    1 = kısmen doğru ama eksik / belirsiz
-    2 = doğru ve metinle uyumlu (kısa da olsa doğru bilgi)
-    """
-
+Rubrik (0-2):
+0 = boş / alakasız / metinle uyuşmuyor
+1 = kısmen doğru ama eksik / belirsiz
+2 = doğru ve metinle uyumlu (kısa da olsa doğru bilgi)
+"""
     schema = """
-    Sadece JSON üret:
-    {
-      "scores": {"kahraman":0|1|2,"mekan":0|1|2,"zaman":0|1|2,"problem":0|1|2,"olaylar":0|1|2,"cozum":0|1|2},
-      "total": 0-12,
-      "reason": "1-2 cümle Türkçe kısa gerekçe"
-    }
-    total = scores toplamı olmalı.
-    """
-
+Sadece JSON üret:
+{
+  "scores": {"kahraman":0|1|2,"mekan":0|1|2,"zaman":0|1|2,"problem":0|1|2,"olaylar":0|1|2,"cozum":0|1|2},
+  "total": 0-12,
+  "reason": "1-2 cümle Türkçe kısa gerekçe"
+}
+total = scores toplamı olmalı.
+"""
     sys = f"""
-    Sen özel eğitim/ÖÖG alanında deneyimli bir öğretmensin.
-    {grade}. sınıf düzeyine göre değerlendir.
-    {rubrik}
-    {schema}
-    """
-
+Sen özel eğitim/ÖÖG alanında deneyimli bir öğretmensin.
+{grade}. sınıf düzeyine göre değerlendir.
+{rubrik}
+{schema}
+"""
     user = json.dumps({"metin": metin_short, "story_map": sm_safe}, ensure_ascii=False)
     resp = openai_json_request(sys, user, model="gpt-4o-mini")
     data = json.loads(resp.choices[0].message.content)
@@ -253,7 +249,7 @@ def ai_score_story_map(metin: str, sm: dict, grade: str):
     def clamp02(x):
         try:
             x = int(x)
-        except:
+        except Exception:
             x = 0
         return 0 if x < 0 else 2 if x > 2 else x
 
@@ -270,13 +266,10 @@ def ai_score_story_map(metin: str, sm: dict, grade: str):
     return out, total, reason
 
 def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
-    ts = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
-    filled = sum(1 for _, v in sm.items() if str(v).strip())
-
     row = [
         st.session_state.get("session_id", ""),
         st.session_state.get("user", ""),
-        ts,
+        now_tr(),
         st.session_state.get("sinif", ""),
         st.session_state.get("metin_id", ""),
         sm.get("kahraman", ""),
@@ -285,7 +278,7 @@ def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
         sm.get("problem", ""),
         sm.get("olaylar", ""),
         sm.get("cozum", ""),
-        filled,
+        sum(1 for _, v in sm.items() if str(v).strip()),
         scores.get("kahraman", 0),
         scores.get("mekan", 0),
         scores.get("zaman", 0),
@@ -295,41 +288,43 @@ def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
         total,
         reason,
     ]
-    return save_to_sheets(row, sheet_name="OykuHaritasi")
+    return append_row_safe("OykuHaritasi", row)
 
 # =========================================================
-# SESSION STATE
+# SESSION STATE INIT
 # =========================================================
-if "phase" not in st.session_state: st.session_state.phase = "auth"
-if "chat_history" not in st.session_state: st.session_state.chat_history = []
-if "saved_perf" not in st.session_state: st.session_state.saved_perf = False
-if "busy" not in st.session_state: st.session_state.busy = False
+def reset_activity_states():
+    st.session_state.chat_history = []
+    st.session_state.saved_perf = False
+    st.session_state.busy = False
 
-if "prediction" not in st.session_state: st.session_state.prediction = ""
-if "attention_ok" not in st.session_state: st.session_state.attention_ok = False
-if "reading_speed" not in st.session_state: st.session_state.reading_speed = "Orta"
-if "repeat_count" not in st.session_state: st.session_state.repeat_count = 0
-if "important_notes" not in st.session_state: st.session_state.important_notes = []
-if "prior_knowledge" not in st.session_state: st.session_state.prior_knowledge = ""
-if "summary" not in st.session_state: st.session_state.summary = ""
+    st.session_state.prediction = ""
+    st.session_state.attention_ok = False
+    st.session_state.reading_speed = "Orta"
+    st.session_state.repeat_count = 0
+    st.session_state.important_notes = []
+    st.session_state.prior_knowledge = ""
+    st.session_state.summary = ""
 
-if "story_map" not in st.session_state:
     st.session_state.story_map = {"kahraman":"", "mekan":"", "zaman":"", "problem":"", "olaylar":"", "cozum":""}
-if "story_map_saved" not in st.session_state:
-    st.session_state.story_map_saved = False
-if "story_map_ai_scored" not in st.session_state:
     st.session_state.story_map_ai_scored = False
+    st.session_state.story_map_last_total = None
+    st.session_state.story_map_last_reason = ""
+    st.session_state.story_map_filled = 0
 
-# Soru geçme + ipucu etkisi için state (ipucu sabit mesaj)
-if "skipped" not in st.session_state: st.session_state.skipped = []
-if "hints_used_by_q" not in st.session_state: st.session_state.hints_used_by_q = {}
-if "correct_no_hint" not in st.session_state: st.session_state.correct_no_hint = 0
-if "correct_with_hint" not in st.session_state: st.session_state.correct_with_hint = 0
-if "question_attempts" not in st.session_state: st.session_state.question_attempts = {}
-if "story_map_last_scores" not in st.session_state: st.session_state.story_map_last_scores = {}
-if "story_map_last_total" not in st.session_state: st.session_state.story_map_last_total = None
-if "story_map_last_reason" not in st.session_state: st.session_state.story_map_last_reason = ""
-if "story_map_filled" not in st.session_state: st.session_state.story_map_filled = 0
+    st.session_state.skipped = []
+    st.session_state.hints_used_by_q = {}
+    st.session_state.correct_no_hint = 0
+    st.session_state.correct_with_hint = 0
+    st.session_state.question_attempts = {}
+
+    # sorularda metin göster
+    st.session_state.show_text_in_questions = False
+
+if "phase" not in st.session_state:
+    st.session_state.phase = "auth"
+if "busy" not in st.session_state:
+    st.session_state.busy = False
 
 # Global çıkış
 if st.session_state.phase != "auth":
@@ -341,7 +336,7 @@ if st.session_state.phase != "auth":
             st.rerun()
 
 # =========================================================
-# 1) GİRİŞ
+# 1) AUTH
 # =========================================================
 if st.session_state.phase == "auth":
     st.title("🌟 Okuma Dostum'a Hoş Geldin!")
@@ -353,38 +348,13 @@ if st.session_state.phase == "auth":
         st.session_state.sinif = s
         st.session_state.session_id = str(uuid.uuid4())[:8]
         st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
-
-        # Resetler
-        st.session_state.chat_history = []
-        st.session_state.saved_perf = False
-        st.session_state.busy = False
-        st.session_state.prediction = ""
-        st.session_state.attention_ok = False
-        st.session_state.reading_speed = "Orta"
-        st.session_state.repeat_count = 0
-        st.session_state.important_notes = []
-        st.session_state.prior_knowledge = ""
-        st.session_state.summary = ""
-        st.session_state.story_map = {"kahraman":"", "mekan":"", "zaman":"", "problem":"", "olaylar":"", "cozum":""}
-        st.session_state.story_map_saved = False
-        st.session_state.story_map_ai_scored = False
-
-        st.session_state.skipped = []
-        st.session_state.hints_used_by_q = {}
-        st.session_state.correct_no_hint = 0
-        st.session_state.correct_with_hint = 0
-        st.session_state.question_attempts = {}
-        st.session_state.story_map_last_scores = {}
-        st.session_state.story_map_last_total = None
-        st.session_state.story_map_last_reason = ""
-        st.session_state.story_map_filled = 0
-
+        reset_activity_states()
         log_chat("LOGIN", json.dumps({"sinif": s, "login_time": st.session_state.login_time}, ensure_ascii=False))
         st.session_state.phase = "setup"
         st.rerun()
 
 # =========================================================
-# 2) METİN SEÇ (BANKADAN)
+# 2) SETUP (BANKADAN METİN SEÇ)
 # =========================================================
 elif st.session_state.phase == "setup":
     st.subheader("📄 Metin Seç (Sistemden)")
@@ -394,15 +364,11 @@ elif st.session_state.phase == "setup":
         metin_ids = list_metin_ids_for_sinif(sinif)
     except Exception:
         metin_ids = []
-        st.error("❌ MetinBankasi okunamadı. Sekme adı/erişim/URL kontrol et.")
+        st.error("❌ MetinBankasi okunamadı. Sekme adlarını ve erişimi kontrol et.")
         st.code(traceback.format_exc())
 
-    if metin_ids:
-        selected_id = st.selectbox("Metin ID seç:", metin_ids)
-    else:
-        selected_id = st.text_input("Metin ID (liste boşsa elle gir):", "Metin_001")
-
-    st.caption("Bu sürümde metin ve sorular sistemden (Google Sheets bankasından) gelir.")
+    selected_id = st.selectbox("Metin ID seç:", metin_ids) if metin_ids else st.text_input("Metin ID:", "Metin_001")
+    st.caption("Metin ve sorular Google Sheets bankasından çekilir.")
 
     if st.button("Metni Hazırla ✨", disabled=st.session_state.busy):
         st.session_state.busy = True
@@ -417,9 +383,7 @@ elif st.session_state.phase == "setup":
 
         st.session_state.activity = activity
         st.session_state.metin_id = selected_id
-
-        metin = st.session_state.activity.get("sade_metin") or ""
-        st.session_state.paragraphs = split_paragraphs(metin)
+        st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
         st.session_state.p_idx = 0
 
         st.session_state.q_idx = 0
@@ -428,39 +392,19 @@ elif st.session_state.phase == "setup":
         st.session_state.start_t = time.time()
         st.session_state.saved_perf = False
 
-        st.session_state.prediction = ""
-        st.session_state.attention_ok = False
-        st.session_state.reading_speed = "Orta"
-        st.session_state.repeat_count = 0
-        st.session_state.important_notes = []
-        st.session_state.prior_knowledge = ""
-        st.session_state.summary = ""
-        st.session_state.story_map = {"kahraman":"", "mekan":"", "zaman":"", "problem":"", "olaylar":"", "cozum":""}
-        st.session_state.story_map_saved = False
-        st.session_state.story_map_ai_scored = False
+        st.session_state.show_text_in_questions = False
 
-        st.session_state.skipped = []
-        st.session_state.hints_used_by_q = {}
-        st.session_state.correct_no_hint = 0
-        st.session_state.correct_with_hint = 0
-        st.session_state.question_attempts = {}
-        st.session_state.story_map_last_scores = {}
-        st.session_state.story_map_last_total = None
-        st.session_state.story_map_last_reason = ""
-        st.session_state.story_map_filled = 0
-
-        log_chat("BANK_LOAD_DONE", json.dumps({"metin_id": selected_id}, ensure_ascii=False))
         st.session_state.busy = False
+        log_chat("BANK_LOAD_DONE", json.dumps({"metin_id": selected_id}, ensure_ascii=False))
         st.session_state.phase = "pre"
         st.rerun()
 
 # =========================================================
-# 3) PRE-READING
+# 3) PRE
 # =========================================================
 elif st.session_state.phase == "pre":
     st.subheader("🟦 Okuma Öncesi (PRE-READING)")
 
-    # --- Metni göstermeden: başlık + kısa ipucu ---
     baslik = st.session_state.activity.get("baslik", "")
     pre_ipucu = st.session_state.activity.get("pre_ipucu", "")
 
@@ -491,13 +435,12 @@ elif st.session_state.phase == "pre":
         st.rerun()
 
 # =========================================================
-# 4) DURING-READING
+# 4) DURING
 # =========================================================
 elif st.session_state.phase == "during":
     st.subheader("🟩 Okuma Sırası (DURING-READING)")
 
-    act = st.session_state.activity
-    metin = act.get("sade_metin") or "Metin yok."
+    metin = st.session_state.activity.get("sade_metin", "Metin yok.")
     paras = st.session_state.get("paragraphs", split_paragraphs(metin))
     p_idx = st.session_state.get("p_idx", 0)
 
@@ -554,12 +497,11 @@ elif st.session_state.phase == "during":
             st.rerun()
 
 # =========================================================
-# 5) POST-READING
+# 5) POST
 # =========================================================
 elif st.session_state.phase == "post":
     st.subheader("🟧 Okuma Sonrası (POST-READING)")
-    act = st.session_state.activity
-    metin = act.get("sade_metin") or "Metin yok."
+    metin = st.session_state.activity.get("sade_metin", "Metin yok.")
 
     st.markdown("<div class='card'><b>Özetleme</b><br/>Metni 2–3 cümleyle anlat.</div>", unsafe_allow_html=True)
     summ = st.text_area("Özetin:", value=st.session_state.summary, height=120)
@@ -597,21 +539,13 @@ elif st.session_state.phase == "post":
             if filled < 3:
                 st.warning("En az 3 alanı doldur (ör. kahraman, mekân, problem).")
             else:
-                payload = {"metin_id": st.session_state.get("metin_id", ""),
-                           "sinif": st.session_state.get("sinif", ""),
-                           "story_map": sm}
-                log_chat("STORY_MAP", json.dumps(payload, ensure_ascii=False))
-
+                log_chat("STORY_MAP", json.dumps({"metin_id": st.session_state.get("metin_id",""), "story_map": sm}, ensure_ascii=False))
                 with st.spinner("AI rubrik puanı hesaplanıyor..."):
                     scores, total, reason = ai_score_story_map(metin, sm, st.session_state.get("sinif",""))
-
                 log_chat("STORY_MAP_SCORE", json.dumps({"scores": scores, "total": total, "reason": reason}, ensure_ascii=False))
-
                 ok = save_story_map_row(sm, scores, total, reason)
                 if ok:
-                    st.session_state.story_map_saved = True
                     st.session_state.story_map_ai_scored = True
-                    st.session_state.story_map_last_scores = scores
                     st.session_state.story_map_last_total = total
                     st.session_state.story_map_last_reason = reason
                     st.success(f"✅ Kaydedildi! AI Puan: {total}/12")
@@ -646,21 +580,38 @@ elif st.session_state.phase == "post":
         st.rerun()
 
 # =========================================================
-# 6) SORULAR (tur/ipucu yok)
+# 6) QUESTIONS  (GÜNCEL: METİNİ GÖSTER + İPUCU METNİ AÇAR)
 # =========================================================
 elif st.session_state.phase == "questions":
-    act = st.session_state.activity
-    sorular = act.get("sorular", [])
-    i = st.session_state.q_idx
+    sorular = st.session_state.activity.get("sorular", [])
+    i = st.session_state.get("q_idx", 0)
 
     if not sorular:
         st.error("Sorular bulunamadı. SoruBankasi'nda bu metin için 6 soru olmalı.")
         st.stop()
 
+    # --- Metni göster/gizle (sorular ekranında) ---
+    metin = st.session_state.activity.get("sade_metin", "")
+
+    if "show_text_in_questions" not in st.session_state:
+        st.session_state.show_text_in_questions = False
+
+    colt1, colt2 = st.columns([3, 1])
+    with colt1:
+        st.markdown("<div class='small-note'>İstersen sorularda metni buradan açıp okuyabilirsin.</div>", unsafe_allow_html=True)
+    with colt2:
+        if st.button("📄 Metni Göster / Gizle"):
+            st.session_state.show_text_in_questions = not st.session_state.show_text_in_questions
+
+    if st.session_state.show_text_in_questions:
+        with st.expander("📄 Metin", expanded=True):
+            st.write(metin)
+
+    st.divider()
+
     if i < len(sorular):
         q = sorular[i]
         st.subheader(f"Soru {i+1} / {len(sorular)}")
-
         st.markdown(f"<div style='font-size:22px; margin-bottom:14px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
 
         colg1, colg2 = st.columns([2, 1])
@@ -671,7 +622,7 @@ elif st.session_state.phase == "questions":
                 if i not in st.session_state.skipped:
                     st.session_state.skipped.append(i)
                 log_chat("QUESTION_SKIPPED", json.dumps({"q_idx": i+1}, ensure_ascii=False))
-                st.session_state.q_idx += 1
+                st.session_state.q_idx = i + 1
                 st.rerun()
 
         for opt in ["A", "B", "C"]:
@@ -686,7 +637,7 @@ elif st.session_state.phase == "questions":
                     "correct": q.get("dogru"),
                     "is_correct": is_correct,
                     "attempt": st.session_state.question_attempts[i],
-                    "hint_used": bool(st.session_state.hints_used_by_q.get(i, False))
+                    "hint_used": bool(st.session_state.hints_used_by_q.get(i, False)),
                 }, ensure_ascii=False))
 
                 if is_correct:
@@ -699,16 +650,19 @@ elif st.session_state.phase == "questions":
                         st.session_state.skipped = [x for x in st.session_state.skipped if x != i]
 
                     st.success("🌟 Doğru!")
-                    st.session_state.q_idx += 1
+                    st.session_state.q_idx = i + 1
                     st.rerun()
                 else:
                     st.error("Tekrar dene!")
 
+        # --- İPUCU: metni otomatik açar ---
         if st.button("💡 İpucu Al", key=f"hint_{i}"):
             st.session_state.hints += 1
             st.session_state.hints_used_by_q[i] = True
             log_chat("HINT", json.dumps({"q_idx": i + 1}, ensure_ascii=False))
-            st.warning("Metni tekrar oku ve önemli kelimelere dikkat et.")
+
+            st.session_state.show_text_in_questions = True
+            st.info("📌 Metni '📄 Metin' bölümünde açtım. Sorudaki anahtar kelimeleri metinde ara ve ilgili paragrafı tekrar oku.")
 
     else:
         if st.session_state.skipped:
@@ -743,27 +697,25 @@ elif st.session_state.phase == "questions":
                     st.session_state.hints,
                     "Evet", "Evet", 0, 0
                 ]
-                ok = save_to_sheets(row, sheet_name="Performans")
+                ok = append_row_safe("Performans", row)
                 if ok:
                     st.session_state.saved_perf = True
                     st.session_state.phase = "done"
                     st.rerun()
 
 # =========================================================
-# 7) BİTTİ + RAPOR
+# 7) DONE
 # =========================================================
 elif st.session_state.phase == "done":
     st.balloons()
     st.success("✅ Bugünkü çalışman kaydedildi!")
 
     sure = round((time.time() - st.session_state.get("start_t", time.time())) / 60, 2)
-    total_q = 6
     dogru = sum(st.session_state.get("correct_map", {}).values())
     ipucu_toplam = st.session_state.get("hints", 0)
     ipucusuz_dogru = st.session_state.get("correct_no_hint", 0)
     ipuculu_dogru = st.session_state.get("correct_with_hint", 0)
     tekrar = st.session_state.get("repeat_count", 0)
-
     sm_filled = st.session_state.get("story_map_filled", 0)
     sm_total = st.session_state.get("story_map_last_total", None)
 
@@ -775,7 +727,7 @@ elif st.session_state.phase == "done":
 **🏃 Seçilen Okuma Hızı:** {st.session_state.get("reading_speed","")}  
 
 **❓ Sorular**
-- Toplam soru: {total_q}
+- Toplam soru: 6
 - Doğru: {dogru}
 - İpucu toplam: {ipucu_toplam}
 - İpucu almadan doğru: {ipucusuz_dogru}
@@ -790,28 +742,11 @@ elif st.session_state.phase == "done":
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.divider()
-
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Yeni Metin"):
             st.session_state.phase = "setup"
-            st.session_state.chat_history = []
-            st.session_state.saved_perf = False
-            st.session_state.busy = False
-            st.session_state.story_map = {"kahraman":"", "mekan":"", "zaman":"", "problem":"", "olaylar":"", "cozum":""}
-            st.session_state.story_map_saved = False
-            st.session_state.story_map_ai_scored = False
-
-            st.session_state.skipped = []
-            st.session_state.hints_used_by_q = {}
-            st.session_state.correct_no_hint = 0
-            st.session_state.correct_with_hint = 0
-            st.session_state.question_attempts = {}
-            st.session_state.story_map_last_scores = {}
-            st.session_state.story_map_last_total = None
-            st.session_state.story_map_last_reason = ""
-            st.session_state.story_map_filled = 0
-
+            reset_activity_states()
             st.rerun()
     with c2:
         if st.button("Çıkış"):
