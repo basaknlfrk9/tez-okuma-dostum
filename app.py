@@ -12,8 +12,9 @@ from io import BytesIO
 # =========================================================
 # OKUMA DOSTUM — STRATEJİ TEMELLİ OKUMA (ÖÖG)
 # PRE / DURING / POST + STORY MAP + AI RUBRİK + SHEETS
-# SORULAR: Google Sheets'ten (bankadan) çekilir
-# tur ve ipucu: KALDIRILDI
+# Metin & Sorular: Google Sheets bankasından çekilir
+# SoruBankasi'nda tur/ipucu yok
+# MetinBankasi'nda baslik + pre_ipucu var (PRE'de gösterilir)
 # =========================================================
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
@@ -119,6 +120,8 @@ def log_chat(event, payload):
 
 # =========================================================
 # BANKA: MetinBankasi + SoruBankasi
+# MetinBankasi: metin_id | sinif | metin | baslik | pre_ipucu
+# SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | dogru
 # =========================================================
 def _norm(s):
     return str(s or "").strip()
@@ -139,9 +142,13 @@ def load_activity_from_bank(metin_id: str, sinif: str):
     m = [r for r in mrows if _norm(r.get("metin_id")) == _norm(metin_id) and _norm(r.get("sinif")) == _norm(sinif)]
     if not m:
         return None, "MetinBankasi'nda bu metin_id + sınıf bulunamadı."
+
     metin = _norm(m[0].get("metin"))
     if not metin:
         return None, "MetinBankasi'nda metin alanı boş."
+
+    baslik = _norm(m[0].get("baslik"))
+    pre_ipucu = _norm(m[0].get("pre_ipucu"))
 
     # SoruBankasi
     ws_q = get_ws("SoruBankasi")
@@ -174,7 +181,7 @@ def load_activity_from_bank(metin_id: str, sinif: str):
     if len(sorular) != 6:
         return None, f"Soru sayısı 6 olmalı. Bulunan: {len(sorular)}"
 
-    return {"sade_metin": metin, "sorular": sorular}, ""
+    return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular}, ""
 
 # =========================================================
 # SES
@@ -313,7 +320,7 @@ if "story_map_saved" not in st.session_state:
 if "story_map_ai_scored" not in st.session_state:
     st.session_state.story_map_ai_scored = False
 
-# --- Soru geçme + ipucu etkisi için state (ipucu butonu sabit mesaj gösterecek) ---
+# Soru geçme + ipucu etkisi için state (ipucu sabit mesaj)
 if "skipped" not in st.session_state: st.session_state.skipped = []
 if "hints_used_by_q" not in st.session_state: st.session_state.hints_used_by_q = {}
 if "correct_no_hint" not in st.session_state: st.session_state.correct_no_hint = 0
@@ -452,6 +459,15 @@ elif st.session_state.phase == "setup":
 # =========================================================
 elif st.session_state.phase == "pre":
     st.subheader("🟦 Okuma Öncesi (PRE-READING)")
+
+    # --- Metni göstermeden: başlık + kısa ipucu ---
+    baslik = st.session_state.activity.get("baslik", "")
+    pre_ipucu = st.session_state.activity.get("pre_ipucu", "")
+
+    if baslik:
+        st.markdown(f"<div class='card'><b>Metnin Başlığı</b><br/>{baslik}</div>", unsafe_allow_html=True)
+    if pre_ipucu:
+        st.markdown(f"<div class='card'><b>Küçük İpucu</b><br/>{pre_ipucu}</div>", unsafe_allow_html=True)
 
     st.markdown("<div class='card'><b>1) Merak Uyandırma</b><br/>Bu metinde ilginç bir durum var. Sence ne olabilir?</div>", unsafe_allow_html=True)
     curiosity = st.text_input("Tahminin (1 cümle):", value=st.session_state.prediction)
@@ -688,7 +704,6 @@ elif st.session_state.phase == "questions":
                 else:
                     st.error("Tekrar dene!")
 
-        # İpucu (sabit, içerik yok)
         if st.button("💡 İpucu Al", key=f"hint_{i}"):
             st.session_state.hints += 1
             st.session_state.hints_used_by_q[i] = True
