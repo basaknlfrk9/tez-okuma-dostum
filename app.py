@@ -15,6 +15,7 @@ from io import BytesIO
 # SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | dogru
 # Performans   : (kayıt)
 # OykuHaritasi : (story map + AI puan)
+# OkumaSüreci  : session_id | ogrenci_kodu | tarih_saat | sinif | metin_id | paragraf_no | kayit_turu | icerik
 #
 # NOT: Sohbet/log sistemi KAPALI (log_chat no-op)
 # =========================================================
@@ -147,10 +148,31 @@ def append_row_safe(sheet_name: str, row):
         return False
 
 # =========================================================
-# LOG KAPALI
+# SOHBET LOG KAPALI
 # =========================================================
 def log_chat(event: str, payload):
     return
+
+# =========================================================
+# OKUMA SÜRECİ KAYDI (YENİ)
+# =========================================================
+def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
+    """
+    OkumaSüreci sekmesine tek satır kayıt atar.
+    OkumaSüreci başlık önerisi:
+    session_id | ogrenci_kodu | tarih_saat | sinif | metin_id | paragraf_no | kayit_turu | icerik
+    """
+    row = [
+        st.session_state.get("session_id", ""),
+        st.session_state.get("user", ""),
+        now_tr(),
+        st.session_state.get("sinif", ""),
+        st.session_state.get("metin_id", ""),
+        paragraf_no if paragraf_no is not None else "",
+        kayit_turu,
+        (icerik or "")[:45000],
+    ]
+    append_row_safe("OkumaSüreci", row)
 
 # =========================================================
 # BANKA OKUMA
@@ -300,20 +322,29 @@ def reset_activity_states():
     st.session_state.saved_perf = False
     st.session_state.busy = False
 
+    # PRE
     st.session_state.prediction = ""
     st.session_state.attention_ok = False
     st.session_state.reading_speed = "Orta"
-    st.session_state.repeat_count = 0
-    st.session_state.important_notes = []
+
+    # DURING
+    st.session_state.repeat_count = 0        # toplam tekrar (dinleme + tekrar okuma)
+    st.session_state.tts_count = 0           # sadece "dinle" sayısı
+    st.session_state.reread_count = 0        # sadece "tekrar oku" sayısı
+    st.session_state.important_notes = []    # [{"p":1,"note":"..."}]
     st.session_state.prior_knowledge = ""
+
+    # POST
     st.session_state.summary = ""
 
+    # STORY MAP
     st.session_state.story_map = {"kahraman":"", "mekan":"", "zaman":"", "problem":"", "olaylar":"", "cozum":""}
     st.session_state.story_map_ai_scored = False
     st.session_state.story_map_last_total = None
     st.session_state.story_map_last_reason = ""
     st.session_state.story_map_filled = 0
 
+    # QUESTIONS
     st.session_state.skipped = []
     st.session_state.hints_used_by_q = {}
     st.session_state.correct_no_hint = 0
@@ -388,6 +419,9 @@ elif st.session_state.phase == "setup":
         st.session_state.start_t = time.time()
         st.session_state.saved_perf = False
 
+        # oturum başı süreç özeti kaydı (opsiyonel ama faydalı)
+        save_reading_process("SESSION_START", f"Metin yüklendi: {selected_id}", paragraf_no=None)
+
         st.session_state.show_text_in_questions = False
         st.session_state.busy = False
 
@@ -421,6 +455,13 @@ elif st.session_state.phase == "pre":
         st.session_state.prediction = curiosity.strip()
         st.session_state.attention_ok = attention
         st.session_state.reading_speed = speed
+
+        # planlama verilerini OkumaSüreci'ne yaz
+        if st.session_state.prediction:
+            save_reading_process("PRE_PREDICTION", st.session_state.prediction, paragraf_no=None)
+        save_reading_process("PRE_ATTENTION", "Evet" if attention else "Hayır", paragraf_no=None)
+        save_reading_process("PRE_SPEED", speed, paragraf_no=None)
+
         st.session_state.phase = "during"
         st.rerun()
 
@@ -438,7 +479,12 @@ elif st.session_state.phase == "during":
     with c1:
         if st.button("🔊 Bu paragrafı dinle"):
             st.session_state.repeat_count += 1
+            st.session_state.tts_count += 1
             current_para = paras[p_idx] if (0 <= p_idx < len(paras)) else metin
+
+            # TTS kullanımını kaydet
+            save_reading_process("TTS_PLAY", "Paragraf dinlendi", paragraf_no=p_idx+1)
+
             fp = get_audio(current_para)
             if fp:
                 st.audio(fp, format="audio/mp3")
@@ -458,27 +504,42 @@ elif st.session_state.phase == "during":
 
         note = st.text_input("Bu paragrafta en önemli şey neydi? (1 cümle)", key=f"imp_{p_idx}")
         coln1, coln2, coln3 = st.columns(3)
+
         with coln1:
             if st.button("📌 Kaydet (Önemli)", key=f"save_imp_{p_idx}"):
                 if note.strip():
                     st.session_state.important_notes.append({"p": p_idx+1, "note": note.strip()})
+                    # önemli notu kaydet (izleme)
+                    save_reading_process("IMPORTANT_NOTE", note.strip(), paragraf_no=p_idx+1)
                     st.success("Kaydedildi!")
                 else:
                     st.warning("Bir cümle yaz.")
+
         with coln2:
             if st.button("🔁 Bu paragrafı tekrar oku", key=f"repeat_p_{p_idx}"):
                 st.session_state.repeat_count += 1
+                st.session_state.reread_count += 1
+                # tekrar okumayı kaydet (izleme)
+                save_reading_process("REPEAT_READ", "Paragraf tekrar okundu", paragraf_no=p_idx+1)
                 st.info("Tekrar okudun. İstersen not ekleyebilirsin.")
+
         with coln3:
             if st.button("➡️ Sonraki paragraf", key=f"next_p_{p_idx}"):
                 st.session_state.p_idx = p_idx + 1
                 st.rerun()
+
     else:
         st.markdown("<div class='card'><b>Ön Bilgi</b><br/>Bu metin sana daha önce yaşadığın/duyduğun bir şeyi hatırlattı mı?</div>", unsafe_allow_html=True)
         pk = st.text_area("Varsa kısaca yaz:", value=st.session_state.prior_knowledge, height=100)
 
         if st.button("Okuma Sonrasına Geç ➜"):
             st.session_state.prior_knowledge = pk.strip()
+            if pk.strip():
+                # ön bilgi aktivasyonu (planlama/izleme)
+                save_reading_process("PRIOR_KNOWLEDGE", pk.strip(), paragraf_no=None)
+            else:
+                save_reading_process("PRIOR_KNOWLEDGE", "(boş)", paragraf_no=None)
+
             st.session_state.phase = "post"
             st.rerun()
 
@@ -494,6 +555,8 @@ elif st.session_state.phase == "post":
 
     if st.button("Özeti Kaydet ✅"):
         st.session_state.summary = summ.strip()
+        if st.session_state.summary:
+            save_reading_process("POST_SUMMARY", st.session_state.summary, paragraf_no=None)
         st.success("✅ Özet kaydedildi!")
 
     st.divider()
@@ -532,6 +595,7 @@ elif st.session_state.phase == "post":
                     st.session_state.story_map_ai_scored = True
                     st.session_state.story_map_last_total = total
                     st.session_state.story_map_last_reason = reason
+                    save_reading_process("STORY_MAP_SCORED", f"{total}/12 | {reason}", paragraf_no=None)
                     st.success(f"✅ Kaydedildi! AI Puan: {total}/12")
                     st.caption(f"Gerekçe: {reason}")
 
@@ -542,6 +606,7 @@ elif st.session_state.phase == "post":
     st.subheader("💬 Okuma Dostu'na Soru Sor (İsteğe bağlı)")
     user_q = st.chat_input("Metinle ilgili soru sorabilirsin…")
     if user_q:
+        save_reading_process("CHAT_Q", user_q, paragraf_no=None)
         ai_resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -550,6 +615,7 @@ elif st.session_state.phase == "post":
             ],
         )
         answer = ai_resp.choices[0].message.content
+        save_reading_process("CHAT_A", answer, paragraf_no=None)
         st.session_state.chat_history.append({"q": user_q, "a": answer})
 
     for chat in st.session_state.chat_history:
@@ -600,6 +666,7 @@ elif st.session_state.phase == "questions":
             if st.button("⏭️ Geç (sonra dönerim)"):
                 if i not in st.session_state.skipped:
                     st.session_state.skipped.append(i)
+                save_reading_process("QUESTION_SKIPPED", f"Soru {i+1}", paragraf_no=None)
                 st.session_state.q_idx = i + 1
                 st.rerun()
 
@@ -608,6 +675,12 @@ elif st.session_state.phase == "questions":
                 st.session_state.question_attempts[i] = st.session_state.question_attempts.get(i, 0) + 1
                 is_correct = (opt == q.get("dogru"))
                 st.session_state.correct_map[i] = 1 if is_correct else 0
+
+                save_reading_process(
+                    "ANSWER",
+                    f"Soru {i+1} | secim={opt} | dogru={q.get('dogru')} | dogru_mu={is_correct} | deneme={st.session_state.question_attempts[i]}",
+                    paragraf_no=None
+                )
 
                 if is_correct:
                     if st.session_state.hints_used_by_q.get(i, False):
@@ -628,6 +701,7 @@ elif st.session_state.phase == "questions":
             st.session_state.hints += 1
             st.session_state.hints_used_by_q[i] = True
             st.session_state.show_text_in_questions = True
+            save_reading_process("HINT", f"Soru {i+1} | ipucu_alindi", paragraf_no=None)
             st.info("📌 Metni '📄 Metin' bölümünde açtım. Sorudaki anahtar kelimeleri metinde ara ve ilgili paragrafı tekrar oku.")
 
     else:
@@ -649,6 +723,14 @@ elif st.session_state.phase == "questions":
                 wrongs = [str(idx + 1) for idx, v in st.session_state.correct_map.items() if v == 0]
                 hatali = "Yanlış: " + ",".join(wrongs) if wrongs else "Hepsi doğru"
 
+                # Planlama/izleme değişkenleri (Performans'a EK olarak sona yazıyoruz)
+                tahmin = st.session_state.get("prediction", "")
+                dikkat = "Evet" if st.session_state.get("attention_ok", False) else "Hayır"
+                hiz = st.session_state.get("reading_speed", "")
+                important_count = len(st.session_state.get("important_notes", []))
+                prior = st.session_state.get("prior_knowledge", "")
+                prior_var = 1 if prior.strip() else 0
+
                 row = [
                     st.session_state.session_id,
                     st.session_state.user,
@@ -661,10 +743,22 @@ elif st.session_state.phase == "questions":
                     hatali,
                     st.session_state.metin_id,
                     st.session_state.hints,
-                    "Evet", "Evet", 0, 0
+                    "Evet", "Evet", 0, 0,
+
+                    # ---- EK SÜTUNLAR (Sheet başlıklarına ekleyebilirsin) ----
+                    tahmin,
+                    dikkat,
+                    hiz,
+                    st.session_state.get("repeat_count", 0),
+                    st.session_state.get("tts_count", 0),
+                    st.session_state.get("reread_count", 0),
+                    important_count,
+                    prior_var,
                 ]
+
                 ok = append_row_safe("Performans", row)
                 if ok:
+                    save_reading_process("SESSION_END", f"Performans kaydedildi | dogru={dogru}/6 | sure={sure}dk", paragraf_no=None)
                     st.session_state.saved_perf = True
                     st.session_state.phase = "done"
                     st.rerun()
@@ -682,6 +776,11 @@ elif st.session_state.phase == "done":
     ipucusuz_dogru = st.session_state.get("correct_no_hint", 0)
     ipuculu_dogru = st.session_state.get("correct_with_hint", 0)
     tekrar = st.session_state.get("repeat_count", 0)
+    tts = st.session_state.get("tts_count", 0)
+    reread = st.session_state.get("reread_count", 0)
+    important_count = len(st.session_state.get("important_notes", []))
+    prior_var = 1 if st.session_state.get("prior_knowledge", "").strip() else 0
+
     sm_filled = st.session_state.get("story_map_filled", 0)
     sm_total = st.session_state.get("story_map_last_total", None)
 
@@ -689,8 +788,16 @@ elif st.session_state.phase == "done":
     st.markdown("<div class='report-card'>", unsafe_allow_html=True)
     st.markdown(f"""
 **🕒 Okuma Süresi:** {sure} dakika  
-**🔁 Tekrar Okuma/Dinleme:** {tekrar}  
 **🏃 Seçilen Okuma Hızı:** {st.session_state.get("reading_speed","")}  
+**✅ Dikkat Onayı:** {"Evet" if st.session_state.get("attention_ok", False) else "Hayır"}  
+**💭 Tahmin:** {st.session_state.get("prediction","") or "—"}  
+
+**🔁 İzleme Davranışları**
+- Toplam tekrar (dinleme + tekrar okuma): {tekrar}
+- Dinleme (TTS): {tts}
+- Tekrar okuma: {reread}
+- Önemli cümle kaydı: {important_count}
+- Ön bilgi yazdı mı: {prior_var}
 
 **❓ Sorular**
 - Toplam soru: 6
