@@ -10,15 +10,19 @@ from gtts import gTTS
 from io import BytesIO
 
 # =========================================================
-# OKUMA DOSTUM — BANKA SÜRÜMÜ (METİN + SORU SHEETS'TEN)
+# OKUMA DOSTUM — BANKA + SÜREÇ LOG (SADECE 5-6. SINIF)
+#
 # MetinBankasi: metin_id | sinif | metin | baslik | pre_ipucu
 # SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | dogru
-# Performans   : (kayıt)
+# Performans   : (1 oturum = 1 satır) + ek sütunlar
 # OykuHaritasi : (story map + AI puan)
-# OkumaSüreci  : session_id | ogrenci_kodu | tarih_saat | sinif | metin_id | paragraf_no | kayit_turu | icerik
+# OkumaSüreci  : (olay bazlı) session_id | ogrenci_kodu | tarih_saat | sinif | metin_id | paragraf_no | kayit_turu | icerik
 #
-# NOT: Sohbet/log sistemi KAPALI (log_chat no-op)
+# SORU SAYISI KURALI:
+# - Metin_007 ve sonrası: 7 soru
+# - Metin_001..Metin_006: 6 soru
 # =========================================================
+
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
 st.markdown("""
@@ -50,6 +54,24 @@ def _norm(x) -> str:
 
 def now_tr() -> str:
     return datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
+
+def extract_metin_number(metin_id: str) -> int:
+    """
+    Metin_001, Metin_7, metin-12 gibi id'lerden sayıyı yakalamaya çalışır.
+    Bulamazsa 0 döner.
+    """
+    s = _norm(metin_id)
+    m = re.search(r"(\d+)", s)
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except Exception:
+        return 0
+
+def expected_question_count(metin_id: str) -> int:
+    n = extract_metin_number(metin_id)
+    return 7 if n >= 7 else 6
 
 def split_paragraphs(text: str):
     text = (text or "").replace("\r", "\n").strip()
@@ -148,20 +170,9 @@ def append_row_safe(sheet_name: str, row):
         return False
 
 # =========================================================
-# SOHBET LOG KAPALI
-# =========================================================
-def log_chat(event: str, payload):
-    return
-
-# =========================================================
-# OKUMA SÜRECİ KAYDI (YENİ)
+# OKUMA SÜRECİ KAYDI
 # =========================================================
 def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
-    """
-    OkumaSüreci sekmesine tek satır kayıt atar.
-    OkumaSüreci başlık önerisi:
-    session_id | ogrenci_kodu | tarih_saat | sinif | metin_id | paragraf_no | kayit_turu | icerik
-    """
     row = [
         st.session_state.get("session_id", ""),
         st.session_state.get("user", ""),
@@ -230,12 +241,20 @@ def load_activity_from_bank(metin_id: str, sinif: str):
         }
         if q["dogru"] not in ["A", "B", "C"]:
             q["dogru"] = "A"
-        sorular.append(q)
+        # boş kökleri atla
+        if q["kok"]:
+            sorular.append(q)
 
-    if len(sorular) != 6:
-        return None, f"Soru sayısı 6 olmalı. Bulunan: {len(sorular)}"
+    exp_n = expected_question_count(metin_id)
+    if len(sorular) != exp_n:
+        return None, f"Soru sayısı bu metin için {exp_n} olmalı. Bulunan: {len(sorular)} (metin_id={metin_id})"
 
-    return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular}, ""
+    return {
+        "sade_metin": metin,
+        "baslik": baslik,
+        "pre_ipucu": pre_ipucu,
+        "sorular": sorular
+    }, ""
 
 # =========================================================
 # STORY MAP AI
@@ -328,10 +347,10 @@ def reset_activity_states():
     st.session_state.reading_speed = "Orta"
 
     # DURING
-    st.session_state.repeat_count = 0        # toplam tekrar (dinleme + tekrar okuma)
-    st.session_state.tts_count = 0           # sadece "dinle" sayısı
-    st.session_state.reread_count = 0        # sadece "tekrar oku" sayısı
-    st.session_state.important_notes = []    # [{"p":1,"note":"..."}]
+    st.session_state.repeat_count = 0
+    st.session_state.tts_count = 0
+    st.session_state.reread_count = 0
+    st.session_state.important_notes = []
     st.session_state.prior_knowledge = ""
 
     # POST
@@ -366,12 +385,12 @@ if st.session_state.phase != "auth":
             st.rerun()
 
 # =========================================================
-# 1) AUTH
+# 1) AUTH (SADECE 5-6)
 # =========================================================
 if st.session_state.phase == "auth":
     st.title("🌟 Okuma Dostum'a Hoş Geldin!")
     u = st.text_input("Öğrenci Kodun (örn: S5-014):")
-    s = st.selectbox("Sınıfın:", ["5", "6", "7", "8"])
+    s = st.selectbox("Sınıfın:", ["5", "6"])  # ✅ sadece 5 ve 6
 
     if st.button("Hadi Başlayalım! 🚀") and u:
         st.session_state.user = u
@@ -419,7 +438,6 @@ elif st.session_state.phase == "setup":
         st.session_state.start_t = time.time()
         st.session_state.saved_perf = False
 
-        # oturum başı süreç özeti kaydı (opsiyonel ama faydalı)
         save_reading_process("SESSION_START", f"Metin yüklendi: {selected_id}", paragraf_no=None)
 
         st.session_state.show_text_in_questions = False
@@ -456,7 +474,6 @@ elif st.session_state.phase == "pre":
         st.session_state.attention_ok = attention
         st.session_state.reading_speed = speed
 
-        # planlama verilerini OkumaSüreci'ne yaz
         if st.session_state.prediction:
             save_reading_process("PRE_PREDICTION", st.session_state.prediction, paragraf_no=None)
         save_reading_process("PRE_ATTENTION", "Evet" if attention else "Hayır", paragraf_no=None)
@@ -481,10 +498,7 @@ elif st.session_state.phase == "during":
             st.session_state.repeat_count += 1
             st.session_state.tts_count += 1
             current_para = paras[p_idx] if (0 <= p_idx < len(paras)) else metin
-
-            # TTS kullanımını kaydet
             save_reading_process("TTS_PLAY", "Paragraf dinlendi", paragraf_no=p_idx+1)
-
             fp = get_audio(current_para)
             if fp:
                 st.audio(fp, format="audio/mp3")
@@ -509,7 +523,6 @@ elif st.session_state.phase == "during":
             if st.button("📌 Kaydet (Önemli)", key=f"save_imp_{p_idx}"):
                 if note.strip():
                     st.session_state.important_notes.append({"p": p_idx+1, "note": note.strip()})
-                    # önemli notu kaydet (izleme)
                     save_reading_process("IMPORTANT_NOTE", note.strip(), paragraf_no=p_idx+1)
                     st.success("Kaydedildi!")
                 else:
@@ -519,7 +532,6 @@ elif st.session_state.phase == "during":
             if st.button("🔁 Bu paragrafı tekrar oku", key=f"repeat_p_{p_idx}"):
                 st.session_state.repeat_count += 1
                 st.session_state.reread_count += 1
-                # tekrar okumayı kaydet (izleme)
                 save_reading_process("REPEAT_READ", "Paragraf tekrar okundu", paragraf_no=p_idx+1)
                 st.info("Tekrar okudun. İstersen not ekleyebilirsin.")
 
@@ -527,19 +539,13 @@ elif st.session_state.phase == "during":
             if st.button("➡️ Sonraki paragraf", key=f"next_p_{p_idx}"):
                 st.session_state.p_idx = p_idx + 1
                 st.rerun()
-
     else:
         st.markdown("<div class='card'><b>Ön Bilgi</b><br/>Bu metin sana daha önce yaşadığın/duyduğun bir şeyi hatırlattı mı?</div>", unsafe_allow_html=True)
         pk = st.text_area("Varsa kısaca yaz:", value=st.session_state.prior_knowledge, height=100)
 
         if st.button("Okuma Sonrasına Geç ➜"):
             st.session_state.prior_knowledge = pk.strip()
-            if pk.strip():
-                # ön bilgi aktivasyonu (planlama/izleme)
-                save_reading_process("PRIOR_KNOWLEDGE", pk.strip(), paragraf_no=None)
-            else:
-                save_reading_process("PRIOR_KNOWLEDGE", "(boş)", paragraf_no=None)
-
+            save_reading_process("PRIOR_KNOWLEDGE", pk.strip() if pk.strip() else "(boş)", paragraf_no=None)
             st.session_state.phase = "post"
             st.rerun()
 
@@ -589,7 +595,6 @@ elif st.session_state.phase == "post":
             else:
                 with st.spinner("AI rubrik puanı hesaplanıyor..."):
                     scores, total, reason = ai_score_story_map(metin, sm, st.session_state.get("sinif",""))
-
                 ok = save_story_map_row(sm, scores, total, reason)
                 if ok:
                     st.session_state.story_map_ai_scored = True
@@ -627,14 +632,15 @@ elif st.session_state.phase == "post":
         st.rerun()
 
 # =========================================================
-# 6) QUESTIONS (METİNİ GÖSTER + İPUCU METNİ AÇAR)
+# 6) QUESTIONS (SORU SAYISI DİNAMİK)
 # =========================================================
 elif st.session_state.phase == "questions":
     sorular = st.session_state.activity.get("sorular", [])
     i = st.session_state.get("q_idx", 0)
+    total_q = len(sorular)
 
     if not sorular:
-        st.error("Sorular bulunamadı. SoruBankasi'nda bu metin için 6 soru olmalı.")
+        st.error("Sorular bulunamadı. SoruBankasi'nda bu metin için soru olmalı.")
         st.stop()
 
     metin = st.session_state.activity.get("sade_metin", "")
@@ -654,9 +660,9 @@ elif st.session_state.phase == "questions":
 
     st.divider()
 
-    if i < len(sorular):
+    if i < total_q:
         q = sorular[i]
-        st.subheader(f"Soru {i+1} / {len(sorular)}")
+        st.subheader(f"Soru {i+1} / {total_q}")
         st.markdown(f"<div style='font-size:22px; margin-bottom:14px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
 
         colg1, colg2 = st.columns([2, 1])
@@ -687,10 +693,8 @@ elif st.session_state.phase == "questions":
                         st.session_state.correct_with_hint += 1
                     else:
                         st.session_state.correct_no_hint += 1
-
                     if i in st.session_state.skipped:
                         st.session_state.skipped = [x for x in st.session_state.skipped if x != i]
-
                     st.success("🌟 Doğru!")
                     st.session_state.q_idx = i + 1
                     st.rerun()
@@ -719,17 +723,18 @@ elif st.session_state.phase == "questions":
         else:
             if not st.session_state.saved_perf:
                 dogru = sum(st.session_state.correct_map.values())
+                total_q = len(sorular)
                 sure = round((time.time() - st.session_state.start_t) / 60, 2)
                 wrongs = [str(idx + 1) for idx, v in st.session_state.correct_map.items() if v == 0]
                 hatali = "Yanlış: " + ",".join(wrongs) if wrongs else "Hepsi doğru"
 
-                # Planlama/izleme değişkenleri (Performans'a EK olarak sona yazıyoruz)
                 tahmin = st.session_state.get("prediction", "")
                 dikkat = "Evet" if st.session_state.get("attention_ok", False) else "Hayır"
                 hiz = st.session_state.get("reading_speed", "")
                 important_count = len(st.session_state.get("important_notes", []))
-                prior = st.session_state.get("prior_knowledge", "")
-                prior_var = 1 if prior.strip() else 0
+                prior_var = 1 if st.session_state.get("prior_knowledge", "").strip() else 0
+
+                basari_yuzde = f"%{round((dogru/total_q)*100, 1)}" if total_q else "%0"
 
                 row = [
                     st.session_state.session_id,
@@ -737,15 +742,15 @@ elif st.session_state.phase == "questions":
                     st.session_state.login_time,
                     sure,
                     st.session_state.sinif,
-                    f"%{round(dogru/6*100, 1)}",
-                    6,
+                    basari_yuzde,
+                    total_q,
                     dogru,
                     hatali,
                     st.session_state.metin_id,
                     st.session_state.hints,
                     "Evet", "Evet", 0, 0,
 
-                    # ---- EK SÜTUNLAR (Sheet başlıklarına ekleyebilirsin) ----
+                    # EK SÜTUNLAR
                     tahmin,
                     dikkat,
                     hiz,
@@ -758,7 +763,7 @@ elif st.session_state.phase == "questions":
 
                 ok = append_row_safe("Performans", row)
                 if ok:
-                    save_reading_process("SESSION_END", f"Performans kaydedildi | dogru={dogru}/6 | sure={sure}dk", paragraf_no=None)
+                    save_reading_process("SESSION_END", f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk", paragraf_no=None)
                     st.session_state.saved_perf = True
                     st.session_state.phase = "done"
                     st.rerun()
@@ -772,9 +777,12 @@ elif st.session_state.phase == "done":
 
     sure = round((time.time() - st.session_state.get("start_t", time.time())) / 60, 2)
     dogru = sum(st.session_state.get("correct_map", {}).values())
+    total_q = len(st.session_state.activity.get("sorular", [])) or 0
+
     ipucu_toplam = st.session_state.get("hints", 0)
     ipucusuz_dogru = st.session_state.get("correct_no_hint", 0)
     ipuculu_dogru = st.session_state.get("correct_with_hint", 0)
+
     tekrar = st.session_state.get("repeat_count", 0)
     tts = st.session_state.get("tts_count", 0)
     reread = st.session_state.get("reread_count", 0)
@@ -786,6 +794,9 @@ elif st.session_state.phase == "done":
 
     st.subheader("📄 Öğrenci Raporu")
     st.markdown("<div class='report-card'>", unsafe_allow_html=True)
+
+    basari_yuzde = f"%{round((dogru/total_q)*100, 1)}" if total_q else "%0"
+
     st.markdown(f"""
 **🕒 Okuma Süresi:** {sure} dakika  
 **🏃 Seçilen Okuma Hızı:** {st.session_state.get("reading_speed","")}  
@@ -800,8 +811,9 @@ elif st.session_state.phase == "done":
 - Ön bilgi yazdı mı: {prior_var}
 
 **❓ Sorular**
-- Toplam soru: 6
+- Toplam soru: {total_q}
 - Doğru: {dogru}
+- Başarı: {basari_yuzde}
 - İpucu toplam: {ipucu_toplam}
 - İpucu almadan doğru: {ipucusuz_dogru}
 - İpucu aldıktan sonra doğru: {ipuculu_dogru}
