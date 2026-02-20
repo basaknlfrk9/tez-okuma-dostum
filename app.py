@@ -18,17 +18,18 @@ from io import BytesIO
 # OykuHaritasi : story map + AI puan
 # OkumaSüreci  : olay bazlı log
 #
-# SORU SAYISI KURALI:
+# SORU SAYISI:
 # - Metin_001..Metin_007: 6 soru
 # - Metin_008 ve sonrası: 7 soru
 #
-# ŞIK KURALI:
+# ŞIK SAYISI:
 # - Metin_001..Metin_004: ABC
 # - Metin_005 ve sonrası: ABCD
 #
-# OKUMA EKRANI METİN GÖSTERİMİ:
-# - Paragraf paragraf gösterir (satır satır bölmez)
-# - Çok uzun paragraf varsa (örn. 2000+ karakter), cümle sınırından güvenli böler
+# OKUMA EKRANI:
+# - Tek satır satır gelen metinlerde (her cümle ayrı satır):
+#   satır sonlarını paragraf yapmaz → boşluğa çevirir
+# - Paragraf yoksa otomatik paragraf üretir (4 cümlede 1 paragraf)
 # =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
@@ -74,16 +75,14 @@ def extract_metin_number(metin_id: str) -> int:
         return 0
 
 def expected_question_count(metin_id: str) -> int:
-    # Metin_001-007 => 6 soru
-    # Metin_008+    => 7 soru
+    # Metin_001-007 => 6 soru, Metin_008+ => 7 soru
     n = extract_metin_number(metin_id)
     return 7 if n >= 8 else 6
 
 def option_letters_for_metin(metin_id: str):
-    # Metin_001-004 => ABC
-    # Metin_005+    => ABCD
+    # Metin_001-004 => ABC, Metin_005+ => ABCD
     n = extract_metin_number(metin_id)
-    return ["A", "B", "C"] if n and n < 5 else ["A", "B", "C", "D"]
+    return ["A", "B", "C"] if (n and n < 5) else ["A", "B", "C", "D"]
 
 def get_audio(text: str):
     clean = re.sub(r"[*#_]", "", (text or ""))[:1000]
@@ -98,9 +97,7 @@ def get_audio(text: str):
         return None
 
 # =========================================================
-# PARAGRAF GÖSTERİMİ (satır satır bölmez)
-# - Metinlerde paragraf boşlukları varsa doğrudan paragraf döndürür.
-# - Çok uzun paragraf varsa (örn 2000+), cümle sınırından güvenli böler.
+# METİN BÖLME / PARAGRAF ÜRETME (DAĞINIK GÖRÜNÜM FIX)
 # =========================================================
 def _split_sentences_tr(s: str):
     s = re.sub(r"\s+", " ", (s or "").strip())
@@ -109,8 +106,8 @@ def _split_sentences_tr(s: str):
     parts = re.split(r"(?<=[.!?…])\s+", s)
     return [p.strip() for p in parts if p.strip()]
 
-def _chunk_long_paragraph(paragraph: str, target_max=1200):
-    """Çok uzun paragrafı cümle sınırından böl (okunabilir kalsın)."""
+def _chunk_long_paragraph(paragraph: str, target_max=2200):
+    """Çok uzun paragrafı cümle sınırından daha büyük bloklarla böl."""
     paragraph = (paragraph or "").strip()
     if len(paragraph) <= target_max:
         return [paragraph]
@@ -121,6 +118,9 @@ def _chunk_long_paragraph(paragraph: str, target_max=1200):
 
     out, buf = [], ""
     for s in sentences:
+        s = s.strip()
+        if not s:
+            continue
         if not buf:
             buf = s
         else:
@@ -136,27 +136,26 @@ def _chunk_long_paragraph(paragraph: str, target_max=1200):
 
 def split_paragraphs(text: str):
     """
-    ✅ DÜZELTİLMİŞ PARAGRAF AYIRMA
-    - Sheets'te cümleler tek satır (tek \n) geliyorsa: bunları BOŞLUK yapar.
-    - Sadece boş satır (çift \n\n) paragraf ayracı kabul eder.
-    - Çok uzun paragraf varsa (2000+): cümle sınırından güvenli böler.
+    - Tek satır sonlarını paragraf sayma: BOŞLUK yap
+    - Sadece boş satır (çift \n\n) paragraf ayırıcı olsun
+    - Paragraf yoksa 4 cümlede bir otomatik paragraf üret
     """
     text = (text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
-    # 1) 3+ satır boşluğunu 2'ye indir
+    # 1) 3+ boş satırı 2'ye indir
     text = re.sub(r"\n{3,}", "\n\n", text)
 
-    # 2) Paragraf ayracını (boş satır) korumak için placeholder koy
+    # 2) Çift satır paragraf ayracını placeholder ile koru
     placeholder = "<<<PARA_BREAK>>>"
     text = re.sub(r"\n\s*\n", placeholder, text)
 
-    # 3) Kalan tek satır sonlarını paragraf yapma: BOŞLUK yap
+    # 3) Kalan tek satır sonlarını boşluğa çevir (satır satır dağınıklık biter)
     text = re.sub(r"\n+", " ", text)
 
-    # 4) Fazla boşlukları toparla
-    text = re.sub(r"\s+", " ", text).strip()
+    # 4) Boşlukları toparla
+    text = re.sub(r"[ \t]+", " ", text).strip()
 
     # 5) Placeholder'ı geri paragraf ayracına çevir
     text = text.replace(placeholder, "\n\n")
@@ -164,11 +163,25 @@ def split_paragraphs(text: str):
     # 6) Paragrafları çıkar
     raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
 
-    # 7) Çok uzun paragrafı güvenli böl
+    # 7) Paragraf yoksa: 4 cümlede bir otomatik paragraf üret
+    if len(raw_paras) <= 1:
+        sents = _split_sentences_tr(text)
+        if len(sents) >= 6:
+            auto, buf = [], []
+            for s in sents:
+                buf.append(s)
+                if len(buf) >= 4:
+                    auto.append(" ".join(buf).strip())
+                    buf = []
+            if buf:
+                auto.append(" ".join(buf).strip())
+            raw_paras = auto
+
+    # 8) Çok uzun paragrafı büyük bloklarla böl
     out = []
     for p in raw_paras:
-        if len(p) > 2000:
-            out.extend(_chunk_long_paragraph(p, target_max=1200))
+        if len(p) > 6000:
+            out.extend(_chunk_long_paragraph(p, target_max=2200))
         else:
             out.append(p)
 
@@ -267,7 +280,6 @@ def list_metin_ids_for_sinif(sinif: str):
     return sorted(list(set(ids)))
 
 def load_activity_from_bank(metin_id: str, sinif: str):
-    # Metin
     ws_m = get_ws("MetinBankasi")
     mrows = ws_m.get_all_records()
 
@@ -302,35 +314,23 @@ def load_activity_from_bank(metin_id: str, sinif: str):
 
     match_q = sorted(match_q, key=qno)
 
-    # ✅ ŞIK seti (ABC / ABCD) metne göre
     opts = option_letters_for_metin(metin_id)
 
     sorular = []
-    empty_kok = []
     for r in match_q:
-        qn = qno(r)
-
-        kok = _norm(r.get("kok"))
-        if not kok:
-            empty_kok.append(qn if qn else "(soru_no yok)")
-            kok = "(Soru kökü eksik)"  # soruyu atlamasın
-
-        dogru = _norm(r.get("dogru")).upper() or "A"
+        kok = _norm(r.get("kok")) or "(Soru kökü eksik)"
+        dogru = _norm(r.get("dogru")).upper() or opts[0]
         if dogru not in opts:
             dogru = opts[0]
 
         q_obj = {"kok": kok, "dogru": dogru}
         for L in opts:
             q_obj[L] = _norm(r.get(L.lower()))
-
         sorular.append(q_obj)
 
-    # ✅ Soru sayısı metne göre
     exp_n = expected_question_count(metin_id)
     if len(sorular) != exp_n:
         diag = f"Bulunan soru={len(sorular)} / Beklenen={exp_n}. "
-        if empty_kok:
-            diag += f"Boş kok olan soru_no'lar: {empty_kok}. "
         diag += "Kontrol: SoruBankasi başlıkları (metin_id, sinif, soru_no, kok, A, B, C, (D varsa), dogru) doğru mu?"
         return None, diag
 
@@ -507,6 +507,8 @@ elif st.session_state.phase == "setup":
 
         st.session_state.activity = activity
         st.session_state.metin_id = selected_id
+
+        # burada kayıt edebiliriz ama during'de yine de her seferinde yenileyeceğiz
         st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
         st.session_state.p_idx = 0
 
@@ -565,7 +567,11 @@ elif st.session_state.phase == "during":
     st.subheader("🟩 Okuma Sırası (DURING-READING)")
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
-    paras = st.session_state.get("paragraphs", split_paragraphs(metin))
+
+    # ✅ ÖNEMLİ: her seferinde yeniden böl (eski cache yüzünden değişiklik görünmeme sorunu biter)
+    paras = split_paragraphs(metin)
+    st.session_state.paragraphs = paras
+
     p_idx = st.session_state.get("p_idx", 0)
 
     if p_idx < len(paras):
@@ -705,8 +711,6 @@ elif st.session_state.phase == "questions":
         st.stop()
 
     metin = st.session_state.activity.get("sade_metin", "")
-
-    # ✅ bu metin için şık listesi (ABC / ABCD)
     opts = st.session_state.activity.get("opts") or option_letters_for_metin(st.session_state.get("metin_id", ""))
 
     if "show_text_in_questions" not in st.session_state:
@@ -790,7 +794,6 @@ elif st.session_state.phase == "questions":
                 "Evet",
                 0,
                 0,
-
                 tahmin,
                 dikkat,
                 hiz,
@@ -822,4 +825,3 @@ elif st.session_state.phase == "done":
     if st.button("Çıkış"):
         st.session_state.clear()
         st.rerun()
-
