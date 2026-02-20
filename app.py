@@ -18,9 +18,9 @@ from io import BytesIO
 # OykuHaritasi : story map + AI puan
 # OkumaSüreci  : olay bazlı log
 #
-# SORU SAYISI KURALI:
-# - Metin_007 ve sonrası: 7 soru
-# - Metin_001..Metin_006: 6 soru
+# SORU SAYISI KURALI (SINIFA GÖRE):
+# - 5. sınıf: 6 soru
+# - 6. sınıf: 7 soru
 #
 # ÖÖG için METİN BÖLÜMLENDİRME:
 # - cümle ortasında kesmez
@@ -62,19 +62,13 @@ def _norm(x) -> str:
 def now_tr() -> str:
     return datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
 
-def extract_metin_number(metin_id: str) -> int:
-    s = _norm(metin_id)
-    m = re.search(r"(\d+)", s)
-    if not m:
-        return 0
-    try:
-        return int(m.group(1))
-    except Exception:
-        return 0
-
-def expected_question_count(metin_id: str) -> int:
-    n = extract_metin_number(metin_id)
-    return 7 if n >= 7 else 6
+def expected_question_count_by_grade(sinif: str) -> int:
+    """
+    5. sınıf -> 6 soru
+    6. sınıf -> 7 soru
+    """
+    s = _norm(sinif)
+    return 7 if s == "6" else 6
 
 def get_audio(text: str):
     clean = re.sub(r"[*#_]", "", (text or ""))[:1000]
@@ -366,7 +360,9 @@ def load_activity_from_bank(metin_id: str, sinif: str):
             "dogru": dogru,
         })
 
-    exp_n = expected_question_count(metin_id)
+    # ✅ SINIFA GÖRE BEKLENEN SORU SAYISI
+    exp_n = expected_question_count_by_grade(sinif)
+
     if len(sorular) != exp_n:
         diag = f"Bulunan soru={len(sorular)} / Beklenen={exp_n}. "
         if empty_kok:
