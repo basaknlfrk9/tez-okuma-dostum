@@ -135,21 +135,43 @@ def _chunk_long_paragraph(paragraph: str, target_max=1200):
     return out
 
 def split_paragraphs(text: str):
+    """
+    ✅ DÜZELTİLMİŞ PARAGRAF AYIRMA
+    - Sheets'te cümleler tek satır (tek \n) geliyorsa: bunları BOŞLUK yapar.
+    - Sadece boş satır (çift \n\n) paragraf ayracı kabul eder.
+    - Çok uzun paragraf varsa (2000+): cümle sınırından güvenli böler.
+    """
     text = (text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
-    # Paragraf ayracı: boş satır
-    raw_paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    # 1) 3+ satır boşluğunu 2'ye indir
+    text = re.sub(r"\n{3,}", "\n\n", text)
 
-    # Eğer metin tek paragraf geldiyse (bazı sheet'lerde boş satır yok), yine tek parça döner.
-    # Çok uzunsa güvenli böl.
+    # 2) Paragraf ayracını (boş satır) korumak için placeholder koy
+    placeholder = "<<<PARA_BREAK>>>"
+    text = re.sub(r"\n\s*\n", placeholder, text)
+
+    # 3) Kalan tek satır sonlarını paragraf yapma: BOŞLUK yap
+    text = re.sub(r"\n+", " ", text)
+
+    # 4) Fazla boşlukları toparla
+    text = re.sub(r"\s+", " ", text).strip()
+
+    # 5) Placeholder'ı geri paragraf ayracına çevir
+    text = text.replace(placeholder, "\n\n")
+
+    # 6) Paragrafları çıkar
+    raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
+
+    # 7) Çok uzun paragrafı güvenli böl
     out = []
-    for p in raw_paras if raw_paras else [text]:
+    for p in raw_paras:
         if len(p) > 2000:
             out.extend(_chunk_long_paragraph(p, target_max=1200))
         else:
             out.append(p)
+
     return out
 
 # =========================================================
@@ -800,3 +822,4 @@ elif st.session_state.phase == "done":
     if st.button("Çıkış"):
         st.session_state.clear()
         st.rerun()
+
