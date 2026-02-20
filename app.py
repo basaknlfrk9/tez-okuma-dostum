@@ -26,12 +26,9 @@ from io import BytesIO
 # - Metin_001..Metin_004: ABC
 # - Metin_005 ve sonrası: ABCD
 #
-# ÖÖG için METİN BÖLÜMLENDİRME:
-# - cümle ortasında kesmez
-# - hedef blok 220-320 karakter
-#
-# “Metnin en önemli şeyi neydi?”:
-# - metin bittiğinde SADECE 1 KEZ sorulur
+# OKUMA EKRANI METİN GÖSTERİMİ:
+# - Paragraf paragraf gösterir (satır satır bölmez)
+# - Çok uzun paragraf varsa (örn. 2000+ karakter), cümle sınırından güvenli böler
 # =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
@@ -101,7 +98,9 @@ def get_audio(text: str):
         return None
 
 # =========================================================
-# ÖÖG için güvenli bölümlendirme (cümle ortasında kesmez)
+# PARAGRAF GÖSTERİMİ (satır satır bölmez)
+# - Metinlerde paragraf boşlukları varsa doğrudan paragraf döndürür.
+# - Çok uzun paragraf varsa (örn 2000+), cümle sınırından güvenli böler.
 # =========================================================
 def _split_sentences_tr(s: str):
     s = re.sub(r"\s+", " ", (s or "").strip())
@@ -110,124 +109,48 @@ def _split_sentences_tr(s: str):
     parts = re.split(r"(?<=[.!?…])\s+", s)
     return [p.strip() for p in parts if p.strip()]
 
-def _force_split_long_sentence(sent: str, max_len=320):
-    sent = (sent or "").strip()
-    if len(sent) <= max_len:
-        return [sent]
+def _chunk_long_paragraph(paragraph: str, target_max=1200):
+    """Çok uzun paragrafı cümle sınırından böl (okunabilir kalsın)."""
+    paragraph = (paragraph or "").strip()
+    if len(paragraph) <= target_max:
+        return [paragraph]
 
-    if "," in sent:
-        pieces, buf = [], ""
-        for part in sent.split(","):
-            part = part.strip()
-            candidate = (buf + (", " if buf else "") + part).strip()
-            if len(candidate) <= max_len:
-                buf = candidate
-            else:
-                if buf:
-                    pieces.append(buf)
-                buf = part
-        if buf:
-            pieces.append(buf)
-        return pieces
+    sentences = _split_sentences_tr(paragraph)
+    if not sentences:
+        return [paragraph[:target_max], paragraph[target_max:]]
 
-    for conj in [" çünkü ", " ama ", " fakat ", " ancak ", " ve ", " sonra ", " böylece "]:
-        if conj in sent:
-            chunks, buf = [], ""
-            parts = sent.split(conj)
-            for i, part in enumerate(parts):
-                part = part.strip()
-                glue = conj.strip() if i > 0 else ""
-                candidate = (buf + (" " + glue + " " if buf and glue else "") + part).strip()
-                if len(candidate) <= max_len:
-                    buf = candidate
-                else:
-                    if buf:
-                        chunks.append(buf)
-                    buf = (glue + " " + part).strip() if glue else part
-            if buf:
-                chunks.append(buf)
-
-            final = []
-            for c in chunks:
-                if len(c) > max_len:
-                    final.extend(_force_split_long_sentence(c, max_len=max_len))
-                else:
-                    final.append(c)
-            return final
-
-    words = sent.split()
-    chunks, buf = [], ""
-    for w in words:
-        candidate = (buf + " " + w).strip()
-        if len(candidate) <= max_len:
-            buf = candidate
+    out, buf = [], ""
+    for s in sentences:
+        if not buf:
+            buf = s
         else:
-            if buf:
-                chunks.append(buf)
-            buf = w
-    if buf:
-        chunks.append(buf)
-    return chunks
-
-def _chunk_by_sentences(paragraph_list, target_max=320):
-    out = []
-    for para in paragraph_list:
-        sentences = _split_sentences_tr(para)
-        if not sentences:
-            continue
-
-        buf = ""
-        for s in sentences:
-            s = s.strip()
-            if not s:
-                continue
-
-            if len(s) > target_max:
-                for lp in _force_split_long_sentence(s, max_len=target_max):
-                    if not buf:
-                        buf = lp
-                    else:
-                        candidate = (buf + " " + lp).strip()
-                        if len(candidate) <= target_max:
-                            buf = candidate
-                        else:
-                            out.append(buf)
-                            buf = lp
-                continue
-
-            if not buf:
+            cand = (buf + " " + s).strip()
+            if len(cand) <= target_max:
+                buf = cand
+            else:
+                out.append(buf)
                 buf = s
-            else:
-                candidate = (buf + " " + s).strip()
-                if len(candidate) <= target_max:
-                    buf = candidate
-                else:
-                    out.append(buf)
-                    buf = s
-
-        if buf:
-            out.append(buf)
-
-    merged = []
-    for block in out:
-        block = block.strip()
-        if not block:
-            continue
-        if merged and len(block) < 80 and len(merged[-1]) + 1 + len(block) <= target_max:
-            merged[-1] = (merged[-1] + " " + block).strip()
-        else:
-            merged.append(block)
-
-    return merged
+    if buf:
+        out.append(buf)
+    return out
 
 def split_paragraphs(text: str):
     text = (text or "").replace("\r", "\n").strip()
     if not text:
         return []
+
+    # Paragraf ayracı: boş satır
     raw_paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    if len(raw_paras) >= 2:
-        return _chunk_by_sentences(raw_paras, target_max=320)
-    return _chunk_by_sentences([text], target_max=320)
+
+    # Eğer metin tek paragraf geldiyse (bazı sheet'lerde boş satır yok), yine tek parça döner.
+    # Çok uzunsa güvenli böl.
+    out = []
+    for p in raw_paras if raw_paras else [text]:
+        if len(p) > 2000:
+            out.extend(_chunk_long_paragraph(p, target_max=1200))
+        else:
+            out.append(p)
+    return out
 
 # =========================================================
 # OPENAI (Story map puan)
