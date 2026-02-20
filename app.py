@@ -167,25 +167,25 @@ def _force_split_long_text(text: str, max_len: int):
         out.append(buf)
     return out
 
-def split_paragraphs(text: str, target_min=900, target_max=1400):
+def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
     """
-    1) Sheets satır satır geliyorsa tek \n -> boşluk yap.
-    2) Paragraf boşluğu (\n\n) varsa koru ama:
-       - Çok kısa paragrafları birleştir.
-    3) Sonuçta 900-1400 karakter bloklar üret.
+    - Tek satır sonlarını (line breaks) bozucu etkiden temizler
+    - Paragrafları çok kısa kalıyorsa birleştirir
+    - 900–1400 karakter arası bloklar üretir
+    - EN ÖNEMLİ: Sonda kalan çok kısa "tail" bloğunu öncekiyle birleştirir
     """
     text = (text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
-    # Çoklu boş satırları normalize et
+    # Çoklu boş satırı normalize et
     text = re.sub(r"\n{3,}", "\n\n", text)
 
     # Paragraf ayraçlarını koru
     placeholder = "<<<P>>>"
     text = re.sub(r"\n\s*\n", placeholder, text)
 
-    # Kalan tüm tek satır sonlarını boşluğa çevir (satır satır kırılmayı bitirir)
+    # Tek satır sonlarını boşluğa çevir (satır satır bölünmeyi bitirir)
     text = re.sub(r"\n+", " ", text)
 
     # Boşlukları toparla, paragraf ayraçlarını geri koy
@@ -193,19 +193,16 @@ def split_paragraphs(text: str, target_min=900, target_max=1400):
     text = text.replace(placeholder, "\n\n")
 
     raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
-
-    # Paragraf yoksa tek paragraf kabul et
     if not raw_paras:
         raw_paras = [text]
 
-    # --- 1) Çok kısa paragrafları birleştir (dağınıklığı keser)
+    # 1) Çok kısa paragrafları birleştir
     merged = []
     buf = ""
     for p in raw_paras:
         if not buf:
             buf = p
         else:
-            # buf kısa ise birleştir
             if len(buf) < target_min:
                 buf = (buf + " " + p).strip()
             else:
@@ -214,12 +211,11 @@ def split_paragraphs(text: str, target_min=900, target_max=1400):
     if buf:
         merged.append(buf)
 
-    # --- 2) Şimdi blok üret: cümleleri bozmadan 900-1400 arası
+    # 2) Cümleleri bozmadan blok üret
     out = []
     for para in merged:
         sents = _split_sentences_tr(para)
         if not sents:
-            # hiç noktalama yoksa zorla böl
             out.extend(_force_split_long_text(para, max_len=target_max))
             continue
 
@@ -227,7 +223,6 @@ def split_paragraphs(text: str, target_min=900, target_max=1400):
         for s in sents:
             if not block:
                 block = s
-                # tek cümle çok uzunsa böl
                 if len(block) > target_max:
                     out.extend(_force_split_long_text(block, max_len=target_max))
                     block = ""
@@ -237,10 +232,13 @@ def split_paragraphs(text: str, target_min=900, target_max=1400):
             if len(cand) <= target_max:
                 block = cand
             else:
-                # block çok kısa kalmasın diye: eğer block < target_min ise s'i parçalayıp ekle
+                # block aşırı kısa kalmasın diye s'yi parçalayıp ekle
                 if len(block) < target_min:
-                    pieces = _force_split_long_text(s, max_len=max(250, target_max - len(block) - 1))
-                    for pi, piece in enumerate(pieces):
+                    pieces = _force_split_long_text(
+                        s,
+                        max_len=max(250, target_max - len(block) - 1)
+                    )
+                    for piece in pieces:
                         cand2 = (block + " " + piece).strip()
                         if len(cand2) <= target_max:
                             block = cand2
@@ -258,20 +256,29 @@ def split_paragraphs(text: str, target_min=900, target_max=1400):
         if block:
             out.append(block)
 
-    # --- 3) Final: çok kısa kalan son blokları birleştir
+    # 3) Final birleştirme: kısa blokları toparla
     final = []
     buf = ""
     for b in out:
         if not buf:
             buf = b
         else:
-            if len(buf) < target_min and (len(buf) + 1 + len(b)) <= (target_max + 400):
+            # buf çok kısaysa bir sonrakiyle birleştir (biraz toleranslı)
+            if len(buf) < target_min and (len(buf) + 1 + len(b)) <= (target_max + 700):
                 buf = (buf + " " + b).strip()
             else:
                 final.append(buf)
                 buf = b
     if buf:
         final.append(buf)
+
+    # ✅ 4) KRİTİK: Sonda kalan çok kısa “tail” bloğunu mutlaka öncekiyle birleştir
+    # (Senin ekrandaki "güzelleştirmeye devam edeceğiz." gibi durum)
+    if len(final) >= 2 and len(final[-1]) < tail_min:
+        # biraz daha tolerans: +900’e kadar izin ver (son kuyruk kaybolsun)
+        if len(final[-2]) + 1 + len(final[-1]) <= (target_max + 900):
+            final[-2] = (final[-2] + " " + final[-1]).strip()
+            final.pop()
 
     return final
 
@@ -911,3 +918,4 @@ elif st.session_state.phase == "done":
     if st.button("Çıkış"):
         st.session_state.clear()
         st.rerun()
+
