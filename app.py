@@ -14,9 +14,6 @@ from io import BytesIO
 #
 # MetinBankasi: metin_id | sinif | metin | baslik | pre_ipucu
 # SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | (D) | dogru
-# Performans   : 1 oturum = 1 satır
-# OykuHaritasi : story map + AI puan
-# OkumaSüreci  : olay bazlı log
 #
 # SORU SAYISI:
 # - Metin_001..Metin_007: 6 soru
@@ -27,9 +24,9 @@ from io import BytesIO
 # - Metin_005 ve sonrası: ABCD
 #
 # OKUMA EKRANI:
-# - Tek satır satır gelen metinlerde (her cümle ayrı satır):
-#   satır sonlarını paragraf yapmaz → boşluğa çevirir
-# - Paragraf yoksa otomatik paragraf üretir (4 cümlede 1 paragraf)
+# - Cümle ortasında kesmez
+# - Kısa parçaları birleştirir
+# - Hedef blok: 900-1400 karakter
 # =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
@@ -48,10 +45,10 @@ st.markdown("""
     box-shadow: 0 10px 20px rgba(0,0,0,0.08);
     border-left: 12px solid #f1c40f; font-size: 22px !important;
     line-height: 1.9 !important; margin-bottom: 18px;
+    white-space: pre-wrap;
   }
   .small-note { color:#666; font-size:16px; }
   .card { background:#fff; padding:16px; border-radius:18px; border:1px solid #eee; margin-bottom:10px; }
-  .report-card { background:#fff; padding:18px; border-radius:18px; border:1px solid #eee; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -75,12 +72,10 @@ def extract_metin_number(metin_id: str) -> int:
         return 0
 
 def expected_question_count(metin_id: str) -> int:
-    # Metin_001-007 => 6 soru, Metin_008+ => 7 soru
     n = extract_metin_number(metin_id)
     return 7 if n >= 8 else 6
 
 def option_letters_for_metin(metin_id: str):
-    # Metin_001-004 => ABC, Metin_005+ => ABCD
     n = extract_metin_number(metin_id)
     return ["A", "B", "C"] if (n and n < 5) else ["A", "B", "C", "D"]
 
@@ -97,95 +92,188 @@ def get_audio(text: str):
         return None
 
 # =========================================================
-# METİN BÖLME / PARAGRAF ÜRETME (DAĞINIK GÖRÜNÜM FIX)
+# METİN BÖLME (OKUMA EKRANI İÇİN) — DAĞINIKLIK FIX
+# - Cümle ortasında kesmez
+# - Kısa parçaları birleştirir
+# - 900-1400 karakter bloklar üretir
 # =========================================================
 def _split_sentences_tr(s: str):
     s = re.sub(r"\s+", " ", (s or "").strip())
     if not s:
         return []
+    # Noktalama sonrası böl
     parts = re.split(r"(?<=[.!?…])\s+", s)
     return [p.strip() for p in parts if p.strip()]
 
-def _chunk_long_paragraph(paragraph: str, target_max=2200):
-    """Çok uzun paragrafı cümle sınırından daha büyük bloklarla böl."""
-    paragraph = (paragraph or "").strip()
-    if len(paragraph) <= target_max:
-        return [paragraph]
+def _force_split_long_text(text: str, max_len: int):
+    """Çok uzun tek cümleyi/tek parçayı güvenli böl (önce virgül/bağlaç, sonra kelime)."""
+    text = (text or "").strip()
+    if len(text) <= max_len:
+        return [text]
 
-    sentences = _split_sentences_tr(paragraph)
-    if not sentences:
-        return [paragraph[:target_max], paragraph[target_max:]]
-
-    out, buf = [], ""
-    for s in sentences:
-        s = s.strip()
-        if not s:
-            continue
-        if not buf:
-            buf = s
-        else:
-            cand = (buf + " " + s).strip()
-            if len(cand) <= target_max:
-                buf = cand
+    # virgül ile dene
+    if "," in text:
+        pieces, buf = [], ""
+        for part in text.split(","):
+            part = part.strip()
+            candidate = (buf + (", " if buf else "") + part).strip()
+            if len(candidate) <= max_len:
+                buf = candidate
             else:
+                if buf:
+                    pieces.append(buf)
+                buf = part
+        if buf:
+            pieces.append(buf)
+        return pieces
+
+    # bağlaçlarla dene
+    for conj in [" çünkü ", " ama ", " fakat ", " ancak ", " ve ", " sonra ", " böylece "]:
+        if conj in text:
+            chunks, buf = [], ""
+            parts = text.split(conj)
+            for i, part in enumerate(parts):
+                part = part.strip()
+                glue = conj.strip() if i > 0 else ""
+                candidate = (buf + (" " + glue + " " if buf and glue else "") + part).strip()
+                if len(candidate) <= max_len:
+                    buf = candidate
+                else:
+                    if buf:
+                        chunks.append(buf)
+                    buf = (glue + " " + part).strip() if glue else part
+            if buf:
+                chunks.append(buf)
+            final = []
+            for c in chunks:
+                if len(c) > max_len:
+                    final.extend(_force_split_long_text(c, max_len=max_len))
+                else:
+                    final.append(c)
+            return final
+
+    # kelime kelime böl
+    words = text.split()
+    out, buf = [], ""
+    for w in words:
+        cand = (buf + " " + w).strip()
+        if len(cand) <= max_len:
+            buf = cand
+        else:
+            if buf:
                 out.append(buf)
-                buf = s
+            buf = w
     if buf:
         out.append(buf)
     return out
 
-def split_paragraphs(text: str):
+def split_paragraphs(text: str, target_min=900, target_max=1400):
     """
-    - Tek satır sonlarını paragraf sayma: BOŞLUK yap
-    - Sadece boş satır (çift \n\n) paragraf ayırıcı olsun
-    - Paragraf yoksa 4 cümlede bir otomatik paragraf üret
+    1) Sheets satır satır geliyorsa tek \n -> boşluk yap.
+    2) Paragraf boşluğu (\n\n) varsa koru ama:
+       - Çok kısa paragrafları birleştir.
+    3) Sonuçta 900-1400 karakter bloklar üret.
     """
     text = (text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
-    # 1) 3+ boş satırı 2'ye indir
+    # Çoklu boş satırları normalize et
     text = re.sub(r"\n{3,}", "\n\n", text)
 
-    # 2) Çift satır paragraf ayracını placeholder ile koru
-    placeholder = "<<<PARA_BREAK>>>"
+    # Paragraf ayraçlarını koru
+    placeholder = "<<<P>>>"
     text = re.sub(r"\n\s*\n", placeholder, text)
 
-    # 3) Kalan tek satır sonlarını boşluğa çevir (satır satır dağınıklık biter)
+    # Kalan tüm tek satır sonlarını boşluğa çevir (satır satır kırılmayı bitirir)
     text = re.sub(r"\n+", " ", text)
 
-    # 4) Boşlukları toparla
-    text = re.sub(r"[ \t]+", " ", text).strip()
-
-    # 5) Placeholder'ı geri paragraf ayracına çevir
+    # Boşlukları toparla, paragraf ayraçlarını geri koy
+    text = re.sub(r"\s+", " ", text).strip()
     text = text.replace(placeholder, "\n\n")
 
-    # 6) Paragrafları çıkar
     raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
 
-    # 7) Paragraf yoksa: 4 cümlede bir otomatik paragraf üret
-    if len(raw_paras) <= 1:
-        sents = _split_sentences_tr(text)
-        if len(sents) >= 6:
-            auto, buf = [], []
-            for s in sents:
-                buf.append(s)
-                if len(buf) >= 4:
-                    auto.append(" ".join(buf).strip())
-                    buf = []
-            if buf:
-                auto.append(" ".join(buf).strip())
-            raw_paras = auto
+    # Paragraf yoksa tek paragraf kabul et
+    if not raw_paras:
+        raw_paras = [text]
 
-    # 8) Çok uzun paragrafı büyük bloklarla böl
-    out = []
+    # --- 1) Çok kısa paragrafları birleştir (dağınıklığı keser)
+    merged = []
+    buf = ""
     for p in raw_paras:
-        if len(p) > 6000:
-            out.extend(_chunk_long_paragraph(p, target_max=2200))
+        if not buf:
+            buf = p
         else:
-            out.append(p)
+            # buf kısa ise birleştir
+            if len(buf) < target_min:
+                buf = (buf + " " + p).strip()
+            else:
+                merged.append(buf)
+                buf = p
+    if buf:
+        merged.append(buf)
 
-    return out
+    # --- 2) Şimdi blok üret: cümleleri bozmadan 900-1400 arası
+    out = []
+    for para in merged:
+        sents = _split_sentences_tr(para)
+        if not sents:
+            # hiç noktalama yoksa zorla böl
+            out.extend(_force_split_long_text(para, max_len=target_max))
+            continue
+
+        block = ""
+        for s in sents:
+            if not block:
+                block = s
+                # tek cümle çok uzunsa böl
+                if len(block) > target_max:
+                    out.extend(_force_split_long_text(block, max_len=target_max))
+                    block = ""
+                continue
+
+            cand = (block + " " + s).strip()
+            if len(cand) <= target_max:
+                block = cand
+            else:
+                # block çok kısa kalmasın diye: eğer block < target_min ise s'i parçalayıp ekle
+                if len(block) < target_min:
+                    pieces = _force_split_long_text(s, max_len=max(250, target_max - len(block) - 1))
+                    for pi, piece in enumerate(pieces):
+                        cand2 = (block + " " + piece).strip()
+                        if len(cand2) <= target_max:
+                            block = cand2
+                        else:
+                            out.append(block)
+                            block = piece
+                else:
+                    out.append(block)
+                    block = s
+
+                if len(block) > target_max:
+                    out.extend(_force_split_long_text(block, max_len=target_max))
+                    block = ""
+
+        if block:
+            out.append(block)
+
+    # --- 3) Final: çok kısa kalan son blokları birleştir
+    final = []
+    buf = ""
+    for b in out:
+        if not buf:
+            buf = b
+        else:
+            if len(buf) < target_min and (len(buf) + 1 + len(b)) <= (target_max + 400):
+                buf = (buf + " " + b).strip()
+            else:
+                final.append(buf)
+                buf = b
+    if buf:
+        final.append(buf)
+
+    return final
 
 # =========================================================
 # OPENAI (Story map puan)
@@ -298,7 +386,6 @@ def load_activity_from_bank(metin_id: str, sinif: str):
     if not metin:
         return None, "MetinBankasi'nda metin alanı boş."
 
-    # Sorular
     ws_q = get_ws("SoruBankasi")
     qrows = ws_q.get_all_records()
     qrows_n = [normrow(r) for r in qrows]
@@ -463,7 +550,7 @@ if st.session_state.phase != "auth":
             st.rerun()
 
 # =========================================================
-# 1) AUTH (SADECE 5-6)
+# 1) AUTH
 # =========================================================
 if st.session_state.phase == "auth":
     st.title("🌟 Okuma Dostum'a Hoş Geldin!")
@@ -508,7 +595,7 @@ elif st.session_state.phase == "setup":
         st.session_state.activity = activity
         st.session_state.metin_id = selected_id
 
-        # burada kayıt edebiliriz ama during'de yine de her seferinde yenileyeceğiz
+        # İlk hazırlık
         st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
         st.session_state.p_idx = 0
 
@@ -568,8 +655,8 @@ elif st.session_state.phase == "during":
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
 
-    # ✅ ÖNEMLİ: her seferinde yeniden böl (eski cache yüzünden değişiklik görünmeme sorunu biter)
-    paras = split_paragraphs(metin)
+    # ✅ HER SEFERİNDE yeniden böl (değişiklik anında yansısın)
+    paras = split_paragraphs(metin, target_min=900, target_max=1400)
     st.session_state.paragraphs = paras
 
     p_idx = st.session_state.get("p_idx", 0)
@@ -755,7 +842,6 @@ elif st.session_state.phase == "questions":
 
         if st.button("💡 İpucu Al", key=f"hint_{i}"):
             st.session_state.hints += 1
-            st.session_state.hints_used_by_q[i] = True
             st.session_state.show_text_in_questions = True
             save_reading_process("HINT", f"Soru {i+1} | ipucu_alindi", paragraf_no=None)
             st.info("📌 Metni '📄 Metin' bölümünde açtım. Anahtar kelimeleri metinde ara ve ilgili bölümü tekrar oku.")
