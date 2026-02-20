@@ -13,14 +13,18 @@ from io import BytesIO
 # OKUMA DOSTUM — BANKA + SÜREÇ LOG (SADECE 5-6. SINIF)
 #
 # MetinBankasi: metin_id | sinif | metin | baslik | pre_ipucu
-# SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | dogru
+# SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | (D) | dogru
 # Performans   : 1 oturum = 1 satır
 # OykuHaritasi : story map + AI puan
 # OkumaSüreci  : olay bazlı log
 #
-# SORU SAYISI KURALI (SINIFA GÖRE):
-# - 5. sınıf: 6 soru
-# - 6. sınıf: 7 soru
+# SORU SAYISI KURALI:
+# - Metin_001..Metin_007: 6 soru
+# - Metin_008 ve sonrası: 7 soru
+#
+# ŞIK KURALI:
+# - Metin_001..Metin_004: ABC
+# - Metin_005 ve sonrası: ABCD
 #
 # ÖÖG için METİN BÖLÜMLENDİRME:
 # - cümle ortasında kesmez
@@ -62,13 +66,27 @@ def _norm(x) -> str:
 def now_tr() -> str:
     return datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
 
-def expected_question_count_by_grade(sinif: str) -> int:
-    """
-    5. sınıf -> 6 soru
-    6. sınıf -> 7 soru
-    """
-    s = _norm(sinif)
-    return 7 if s == "6" else 6
+def extract_metin_number(metin_id: str) -> int:
+    s = _norm(metin_id)
+    m = re.search(r"(\d+)", s)
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except Exception:
+        return 0
+
+def expected_question_count(metin_id: str) -> int:
+    # Metin_001-007 => 6 soru
+    # Metin_008+    => 7 soru
+    n = extract_metin_number(metin_id)
+    return 7 if n >= 8 else 6
+
+def option_letters_for_metin(metin_id: str):
+    # Metin_001-004 => ABC
+    # Metin_005+    => ABCD
+    n = extract_metin_number(metin_id)
+    return ["A", "B", "C"] if n and n < 5 else ["A", "B", "C", "D"]
 
 def get_audio(text: str):
     clean = re.sub(r"[*#_]", "", (text or ""))[:1000]
@@ -339,38 +357,39 @@ def load_activity_from_bank(metin_id: str, sinif: str):
 
     match_q = sorted(match_q, key=qno)
 
+    # ✅ ŞIK seti (ABC / ABCD) metne göre
+    opts = option_letters_for_metin(metin_id)
+
     sorular = []
     empty_kok = []
     for r in match_q:
         qn = qno(r)
+
         kok = _norm(r.get("kok"))
         if not kok:
             empty_kok.append(qn if qn else "(soru_no yok)")
-            continue
+            kok = "(Soru kökü eksik)"  # soruyu atlamasın
 
         dogru = _norm(r.get("dogru")).upper() or "A"
-        if dogru not in ["A", "B", "C"]:
-            dogru = "A"
+        if dogru not in opts:
+            dogru = opts[0]
 
-        sorular.append({
-            "kok": kok,
-            "A": _norm(r.get("a")),
-            "B": _norm(r.get("b")),
-            "C": _norm(r.get("c")),
-            "dogru": dogru,
-        })
+        q_obj = {"kok": kok, "dogru": dogru}
+        for L in opts:
+            q_obj[L] = _norm(r.get(L.lower()))
 
-    # ✅ SINIFA GÖRE BEKLENEN SORU SAYISI
-    exp_n = expected_question_count_by_grade(sinif)
+        sorular.append(q_obj)
 
+    # ✅ Soru sayısı metne göre
+    exp_n = expected_question_count(metin_id)
     if len(sorular) != exp_n:
         diag = f"Bulunan soru={len(sorular)} / Beklenen={exp_n}. "
         if empty_kok:
             diag += f"Boş kok olan soru_no'lar: {empty_kok}. "
-        diag += "Kontrol: SoruBankasi başlıkları (metin_id, sinif, soru_no, kok, A, B, C, dogru) doğru mu?"
+        diag += "Kontrol: SoruBankasi başlıkları (metin_id, sinif, soru_no, kok, A, B, C, (D varsa), dogru) doğru mu?"
         return None, diag
 
-    return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular}, ""
+    return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
 
 # =========================================================
 # STORY MAP AI
@@ -742,6 +761,9 @@ elif st.session_state.phase == "questions":
 
     metin = st.session_state.activity.get("sade_metin", "")
 
+    # ✅ bu metin için şık listesi (ABC / ABCD)
+    opts = st.session_state.activity.get("opts") or option_letters_for_metin(st.session_state.get("metin_id", ""))
+
     if "show_text_in_questions" not in st.session_state:
         st.session_state.show_text_in_questions = False
 
@@ -763,7 +785,7 @@ elif st.session_state.phase == "questions":
         st.subheader(f"Soru {i+1} / {total_q}")
         st.markdown(f"<div style='font-size:22px; margin-bottom:14px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
 
-        for opt in ["A", "B", "C"]:
+        for opt in opts:
             if st.button(f"{opt}) {q.get(opt,'')}", key=f"q_{i}_{opt}"):
                 st.session_state.question_attempts[i] = st.session_state.question_attempts.get(i, 0) + 1
                 is_correct = (opt == q.get("dogru"))
