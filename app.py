@@ -1,3 +1,5 @@
+# app.py — Okuma Dostum (SINIF KALDIRILDI, ilk ekranda METİN seçilir)
+
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
@@ -10,10 +12,10 @@ from gtts import gTTS
 from io import BytesIO
 
 # =========================================================
-# OKUMA DOSTUM — BANKA + SÜREÇ LOG (SADECE 5-6. SINIF)
+# OKUMA DOSTUM — BANKA + SÜREÇ LOG (SINIF KALDIRILDI)
 #
-# MetinBankasi: metin_id | sinif | metin | baslik | pre_ipucu
-# SoruBankasi : metin_id | sinif | soru_no | kok | A | B | C | (D) | dogru
+# MetinBankasi: metin_id | metin | baslik | pre_ipucu | (sinif olabilir ama kullanılmıyor)
+# SoruBankasi : metin_id | soru_no | kok | A | B | C | (D) | dogru | (sinif olabilir ama kullanılmıyor)
 #
 # SORU SAYISI:
 # - Metin_001..Metin_007: 6 soru
@@ -92,26 +94,20 @@ def get_audio(text: str):
         return None
 
 # =========================================================
-# METİN BÖLME (OKUMA EKRANI İÇİN) — DAĞINIKLIK FIX
-# - Cümle ortasında kesmez
-# - Kısa parçaları birleştirir
-# - 900-1400 karakter bloklar üretir
+# METİN BÖLME (OKUMA EKRANI İÇİN)
 # =========================================================
 def _split_sentences_tr(s: str):
     s = re.sub(r"\s+", " ", (s or "").strip())
     if not s:
         return []
-    # Noktalama sonrası böl
     parts = re.split(r"(?<=[.!?…])\s+", s)
     return [p.strip() for p in parts if p.strip()]
 
 def _force_split_long_text(text: str, max_len: int):
-    """Çok uzun tek cümleyi/tek parçayı güvenli böl (önce virgül/bağlaç, sonra kelime)."""
     text = (text or "").strip()
     if len(text) <= max_len:
         return [text]
 
-    # virgül ile dene
     if "," in text:
         pieces, buf = [], ""
         for part in text.split(","):
@@ -127,7 +123,6 @@ def _force_split_long_text(text: str, max_len: int):
             pieces.append(buf)
         return pieces
 
-    # bağlaçlarla dene
     for conj in [" çünkü ", " ama ", " fakat ", " ancak ", " ve ", " sonra ", " böylece "]:
         if conj in text:
             chunks, buf = [], ""
@@ -144,6 +139,7 @@ def _force_split_long_text(text: str, max_len: int):
                     buf = (glue + " " + part).strip() if glue else part
             if buf:
                 chunks.append(buf)
+
             final = []
             for c in chunks:
                 if len(c) > max_len:
@@ -152,7 +148,6 @@ def _force_split_long_text(text: str, max_len: int):
                     final.append(c)
             return final
 
-    # kelime kelime böl
     words = text.split()
     out, buf = [], ""
     for w in words:
@@ -168,27 +163,14 @@ def _force_split_long_text(text: str, max_len: int):
     return out
 
 def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
-    """
-    - Tek satır sonlarını (line breaks) bozucu etkiden temizler
-    - Paragrafları çok kısa kalıyorsa birleştirir
-    - 900–1400 karakter arası bloklar üretir
-    - EN ÖNEMLİ: Sonda kalan çok kısa "tail" bloğunu öncekiyle birleştirir
-    """
     text = (text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
-    # Çoklu boş satırı normalize et
     text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # Paragraf ayraçlarını koru
     placeholder = "<<<P>>>"
     text = re.sub(r"\n\s*\n", placeholder, text)
-
-    # Tek satır sonlarını boşluğa çevir (satır satır bölünmeyi bitirir)
     text = re.sub(r"\n+", " ", text)
-
-    # Boşlukları toparla, paragraf ayraçlarını geri koy
     text = re.sub(r"\s+", " ", text).strip()
     text = text.replace(placeholder, "\n\n")
 
@@ -196,7 +178,6 @@ def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
     if not raw_paras:
         raw_paras = [text]
 
-    # 1) Çok kısa paragrafları birleştir
     merged = []
     buf = ""
     for p in raw_paras:
@@ -211,7 +192,6 @@ def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
     if buf:
         merged.append(buf)
 
-    # 2) Cümleleri bozmadan blok üret
     out = []
     for para in merged:
         sents = _split_sentences_tr(para)
@@ -232,7 +212,6 @@ def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
             if len(cand) <= target_max:
                 block = cand
             else:
-                # block aşırı kısa kalmasın diye s'yi parçalayıp ekle
                 if len(block) < target_min:
                     pieces = _force_split_long_text(
                         s,
@@ -256,14 +235,12 @@ def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
         if block:
             out.append(block)
 
-    # 3) Final birleştirme: kısa blokları toparla
     final = []
     buf = ""
     for b in out:
         if not buf:
             buf = b
         else:
-            # buf çok kısaysa bir sonrakiyle birleştir (biraz toleranslı)
             if len(buf) < target_min and (len(buf) + 1 + len(b)) <= (target_max + 700):
                 buf = (buf + " " + b).strip()
             else:
@@ -272,10 +249,7 @@ def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
     if buf:
         final.append(buf)
 
-    # ✅ 4) KRİTİK: Sonda kalan çok kısa “tail” bloğunu mutlaka öncekiyle birleştir
-    # (Senin ekrandaki "güzelleştirmeye devam edeceğiz." gibi durum)
     if len(final) >= 2 and len(final[-1]) < tail_min:
-        # biraz daha tolerans: +900’e kadar izin ver (son kuyruk kaybolsun)
         if len(final[-2]) + 1 + len(final[-1]) <= (target_max + 900):
             final[-2] = (final[-2] + " " + final[-1]).strip()
             final.pop()
@@ -336,6 +310,11 @@ def get_ws(sheet_name: str):
             return w
     raise ValueError(f"Sheet sekmesi bulunamadı: '{sheet_name}'. Mevcut: {[w.title for w in sh.worksheets()]}")
 
+@st.cache_data(ttl=300)
+def read_sheet_records(sheet_name: str):
+    ws = get_ws(sheet_name)
+    return ws.get_all_records()
+
 def append_row_safe(sheet_name: str, row):
     try:
         ws = get_ws(sheet_name)
@@ -354,7 +333,7 @@ def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
         st.session_state.get("session_id", ""),
         st.session_state.get("user", ""),
         now_tr(),
-        st.session_state.get("sinif", ""),
+        "",  # sinif kaldırıldı -> boş
         st.session_state.get("metin_id", ""),
         paragraf_no if paragraf_no is not None else "",
         kayit_turu,
@@ -363,28 +342,26 @@ def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
     append_row_safe("OkumaSüreci", row)
 
 # =========================================================
-# BANKA OKUMA
+# BANKA OKUMA (SINIF FİLTRESİ YOK)
 # =========================================================
-def list_metin_ids_for_sinif(sinif: str):
-    ws = get_ws("MetinBankasi")
-    rows = ws.get_all_records()
+def list_metin_ids():
+    rows = read_sheet_records("MetinBankasi")
     ids = []
     for r in rows:
-        if _norm(r.get("sinif")) == _norm(sinif) and _norm(r.get("metin_id")):
+        if _norm(r.get("metin_id")):
             ids.append(_norm(r.get("metin_id")))
     return sorted(list(set(ids)))
 
-def load_activity_from_bank(metin_id: str, sinif: str):
-    ws_m = get_ws("MetinBankasi")
-    mrows = ws_m.get_all_records()
+def load_activity_from_bank(metin_id: str):
+    mrows = read_sheet_records("MetinBankasi")
 
     def normrow(r: dict):
         return {str(k).strip().lower(): ("" if r.get(k) is None else str(r.get(k)).strip()) for k in r.keys()}
 
     mrows_n = [normrow(r) for r in mrows]
-    match_m = [r for r in mrows_n if _norm(r.get("metin_id")) == _norm(metin_id) and _norm(r.get("sinif")) == _norm(sinif)]
+    match_m = [r for r in mrows_n if _norm(r.get("metin_id")) == _norm(metin_id)]
     if not match_m:
-        return None, "MetinBankasi'nda bu metin_id + sınıf bulunamadı."
+        return None, "MetinBankasi'nda bu metin_id bulunamadı."
 
     metin = _norm(match_m[0].get("metin"))
     baslik = _norm(match_m[0].get("baslik"))
@@ -393,13 +370,12 @@ def load_activity_from_bank(metin_id: str, sinif: str):
     if not metin:
         return None, "MetinBankasi'nda metin alanı boş."
 
-    ws_q = get_ws("SoruBankasi")
-    qrows = ws_q.get_all_records()
+    qrows = read_sheet_records("SoruBankasi")
     qrows_n = [normrow(r) for r in qrows]
 
-    match_q = [r for r in qrows_n if _norm(r.get("metin_id")) == _norm(metin_id) and _norm(r.get("sinif")) == _norm(sinif)]
+    match_q = [r for r in qrows_n if _norm(r.get("metin_id")) == _norm(metin_id)]
     if not match_q:
-        return None, "SoruBankasi'nda bu metin_id + sınıf için soru bulunamadı."
+        return None, "SoruBankasi'nda bu metin_id için soru bulunamadı."
 
     def qno(r):
         s = str(r.get("soru_no", "")).strip()
@@ -407,8 +383,16 @@ def load_activity_from_bank(metin_id: str, sinif: str):
         return int(m.group(1)) if m else 0
 
     match_q = sorted(match_q, key=qno)
-
     opts = option_letters_for_metin(metin_id)
+
+    def get_opt(r, L):
+        # r'nin keyleri lower; yine de toleranslı olsun
+        candidates = [L.lower(), L.lower().strip(), L.strip().lower()]
+        for c in candidates:
+            v = r.get(c)
+            if v is not None and str(v).strip():
+                return _norm(v)
+        return ""
 
     sorular = []
     for r in match_q:
@@ -419,21 +403,21 @@ def load_activity_from_bank(metin_id: str, sinif: str):
 
         q_obj = {"kok": kok, "dogru": dogru}
         for L in opts:
-            q_obj[L] = _norm(r.get(L.lower()))
+            q_obj[L] = get_opt(r, L)
         sorular.append(q_obj)
 
     exp_n = expected_question_count(metin_id)
     if len(sorular) != exp_n:
         diag = f"Bulunan soru={len(sorular)} / Beklenen={exp_n}. "
-        diag += "Kontrol: SoruBankasi başlıkları (metin_id, sinif, soru_no, kok, A, B, C, (D varsa), dogru) doğru mu?"
+        diag += "Kontrol: SoruBankasi başlıkları (metin_id, soru_no, kok, A, B, C, (D varsa), dogru) doğru mu?"
         return None, diag
 
     return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
 
 # =========================================================
-# STORY MAP AI
+# STORY MAP AI (SINIF YOK -> 5-6 bandı)
 # =========================================================
-def ai_score_story_map(metin: str, sm: dict, grade: str):
+def ai_score_story_map(metin: str, sm: dict):
     metin_short = (metin or "")[:2500]
     sm_safe = {k: (v or "")[:600] for k, v in (sm or {}).items()}
 
@@ -454,15 +438,20 @@ total = scores toplamı olmalı.
 """
     sys = f"""
 Sen özel eğitim/ÖÖG alanında deneyimli bir öğretmensin.
-{grade}. sınıf düzeyine göre değerlendir.
+İlköğretim düzeyine göre (5-6. sınıf bandı) değerlendir.
 {rubrik}
 {schema}
 """
     user = json.dumps({"metin": metin_short, "story_map": sm_safe}, ensure_ascii=False)
     resp = openai_json_request(sys, user, model="gpt-4o-mini")
-    data = json.loads(resp.choices[0].message.content)
 
-    scores = data.get("scores", {})
+    raw = resp.choices[0].message.content
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = {"scores": {}, "total": 0, "reason": "AI çıktısı okunamadı."}
+
+    scores = data.get("scores", {}) or {}
 
     def clamp02(x):
         try:
@@ -488,7 +477,7 @@ def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
         st.session_state.get("session_id", ""),
         st.session_state.get("user", ""),
         now_tr(),
-        st.session_state.get("sinif", ""),
+        "",  # sinif kaldırıldı -> boş
         st.session_state.get("metin_id", ""),
         sm.get("kahraman", ""),
         sm.get("mekan", ""),
@@ -557,16 +546,25 @@ if st.session_state.phase != "auth":
             st.rerun()
 
 # =========================================================
-# 1) AUTH
+# 1) AUTH (İLK EKRAN: METİN SEÇ)
 # =========================================================
 if st.session_state.phase == "auth":
     st.title("🌟 Okuma Dostum'a Hoş Geldin!")
     u = st.text_input("Öğrenci Kodun (örn: S5-014):")
-    s = st.selectbox("Sınıfın:", ["5", "6"])
 
-    if st.button("Hadi Başlayalım! 🚀") and u:
+    try:
+        metin_ids_all = list_metin_ids()
+    except Exception:
+        metin_ids_all = []
+        st.error("❌ MetinBankasi okunamadı. Sekme adlarını ve erişimi kontrol et.")
+        st.code(traceback.format_exc())
+
+    selected_id = st.selectbox("Metin seç:", metin_ids_all) if metin_ids_all else st.text_input("Metin ID:", "Metin_001")
+    st.caption("Sınıf seçimi kaldırıldı. Metin seçince devam edilir.")
+
+    if st.button("Hadi Başlayalım! 🚀") and u and selected_id:
         st.session_state.user = u
-        st.session_state.sinif = s
+        st.session_state.metin_id = selected_id
         st.session_state.session_id = str(uuid.uuid4())[:8]
         st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
         reset_activity_states()
@@ -577,32 +575,27 @@ if st.session_state.phase == "auth":
 # 2) SETUP
 # =========================================================
 elif st.session_state.phase == "setup":
-    st.subheader("📄 Metin Seç (Sistemden)")
-    sinif = st.session_state.sinif
+    st.subheader("📄 Metin Hazırla (Sistemden)")
 
-    try:
-        metin_ids = list_metin_ids_for_sinif(sinif)
-    except Exception:
-        metin_ids = []
-        st.error("❌ MetinBankasi okunamadı. Sekme adlarını ve erişimi kontrol et.")
-        st.code(traceback.format_exc())
+    selected_id = st.session_state.get("metin_id", "")
+    if not selected_id:
+        st.error("Metin seçilmemiş. Baştan giriş yap.")
+        st.stop()
 
-    selected_id = st.selectbox("Metin ID seç:", metin_ids) if metin_ids else st.text_input("Metin ID:", "Metin_001")
+    st.markdown(f"<div class='card'><b>Seçili Metin</b><br/>{selected_id}</div>", unsafe_allow_html=True)
     st.caption("Metin ve sorular Google Sheets bankasından çekilir.")
 
     if st.button("Metni Hazırla ✨", disabled=st.session_state.busy):
         st.session_state.busy = True
 
-        activity, err = load_activity_from_bank(selected_id, sinif)
+        activity, err = load_activity_from_bank(selected_id)
         if activity is None:
             st.session_state.busy = False
             st.error(f"❌ Yüklenemedi: {err}")
             st.stop()
 
         st.session_state.activity = activity
-        st.session_state.metin_id = selected_id
 
-        # İlk hazırlık
         st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
         st.session_state.p_idx = 0
 
@@ -662,10 +655,13 @@ elif st.session_state.phase == "during":
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
 
-    # ✅ HER SEFERİNDE yeniden böl (değişiklik anında yansısın)
-    paras = split_paragraphs(metin, target_min=900, target_max=1400)
-    st.session_state.paragraphs = paras
+    # Metin değişmediyse tekrar bölme (performans)
+    metin_hash = hash(metin)
+    if st.session_state.get("metin_hash") != metin_hash:
+        st.session_state.paragraphs = split_paragraphs(metin, target_min=900, target_max=1400)
+        st.session_state.metin_hash = metin_hash
 
+    paras = st.session_state.get("paragraphs", []) or []
     p_idx = st.session_state.get("p_idx", 0)
 
     if p_idx < len(paras):
@@ -771,7 +767,7 @@ elif st.session_state.phase == "post":
                 st.warning("En az 3 alanı doldur (ör. kahraman, mekân, problem).")
             else:
                 with st.spinner("AI rubrik puanı hesaplanıyor..."):
-                    scores, total, reason = ai_score_story_map(metin, sm, st.session_state.get("sinif", ""))
+                    scores, total, reason = ai_score_story_map(metin, sm)
                 ok = save_story_map_row(sm, scores, total, reason)
                 if ok:
                     st.session_state.story_map_ai_scored = True
@@ -876,7 +872,7 @@ elif st.session_state.phase == "questions":
                 st.session_state.user,
                 st.session_state.login_time,
                 sure,
-                st.session_state.sinif,
+                "",  # sinif kaldırıldı -> boş
                 basari_yuzde,
                 total_q,
                 dogru,
@@ -912,10 +908,10 @@ elif st.session_state.phase == "done":
     st.success("✅ Bugünkü çalışman kaydedildi!")
 
     if st.button("Yeni Metin"):
-        st.session_state.phase = "setup"
+        st.session_state.phase = "auth"  # en başa dön, metin yeniden seçilsin
+        st.session_state.metin_id = ""
         reset_activity_states()
         st.rerun()
     if st.button("Çıkış"):
         st.session_state.clear()
         st.rerun()
-
