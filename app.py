@@ -1,5 +1,3 @@
-# app.py — Okuma Dostum (SINIF KALDIRILDI, ilk ekranda METİN seçilir)
-
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
@@ -92,6 +90,100 @@ def get_audio(text: str):
     except Exception:
         st.error("❌ Ses oluşturulamadı. Lütfen tekrar deneyin.")
         return None
+
+# =========================================================
+# ÜSTBİLİŞSEL RUBRİK (KURAL TABANLI)  ✅ EKLENDİ
+# Google Sheet'te yeni sekme adı: UstBilisselRubrik
+# Kolonlar:
+# session_id | user | time | metin_id | planlama | izleme | degerlendirme | transfer | total | reason | signals_json
+# =========================================================
+def compute_metacog_signals():
+    qa = st.session_state.get("question_attempts", {}) or {}
+    try:
+        attempts_total = sum(int(v) for v in qa.values())
+    except Exception:
+        attempts_total = 0
+
+    return {
+        "prediction_len": len((st.session_state.get("prediction") or "").strip()),
+        "attention_ok": bool(st.session_state.get("attention_ok", False)),
+        "speed": st.session_state.get("reading_speed", ""),
+        "repeat_count": int(st.session_state.get("repeat_count", 0)),
+        "tts_count": int(st.session_state.get("tts_count", 0)),
+        "reread_count": int(st.session_state.get("reread_count", 0)),
+        "hints": int(st.session_state.get("hints", 0)),
+        "attempts_total": int(attempts_total),
+        "summary_len": len((st.session_state.get("summary") or "").strip()),
+        "important_note_len": len((st.session_state.get("final_important_note") or "").strip()),
+        "prior_knowledge_len": len((st.session_state.get("prior_knowledge") or "").strip()),
+        "story_map_total": int(st.session_state.get("story_map_last_total") or 0),
+        "story_map_filled": int(st.session_state.get("story_map_filled") or 0),
+        "reflection_strategy_len": len((st.session_state.get("reflection_strategy") or "").strip()),
+        "reflection_next_len": len((st.session_state.get("reflection_next_time") or "").strip()),
+    }
+
+def rule_based_metacog_score(sig):
+    # PLANLAMA 0-2
+    plan = 0
+    if sig["prediction_len"] >= 5:
+        plan += 1
+    if sig["attention_ok"]:
+        plan += 1
+    plan = min(plan, 2)
+
+    # İZLEME 0-3
+    monitor = 0
+    if (sig["reread_count"] + sig["tts_count"]) >= 1:
+        monitor += 1
+    if sig["hints"] >= 1:
+        monitor += 1
+    if sig["attempts_total"] >= 2:
+        monitor += 1
+    monitor = min(monitor, 3)
+
+    # DEĞERLENDİRME 0-3
+    evals = 0
+    if sig["summary_len"] >= 20:
+        evals += 1
+    if sig["important_note_len"] >= 10:
+        evals += 1
+    if sig["story_map_total"] >= 6 or sig["story_map_filled"] >= 4:
+        evals += 1
+    evals = min(evals, 3)
+
+    # TRANSFER 0-2 (bir dahaki sefere planı)
+    transfer = 0
+    if sig["reflection_next_len"] >= 8:
+        transfer = 1
+    if sig["reflection_next_len"] >= 20:
+        transfer = 2
+
+    total = plan + monitor + evals + transfer
+    reason = "Kural tabanlı: planlama(tahmin+dikkat), izleme(tekrar/tts/ipucu/deneme), değerlendirme(özet/önemli bilgi/story map), transfer(gelecek planı)."
+    return {
+        "planlama": plan,
+        "izleme": monitor,
+        "degerlendirme": evals,
+        "transfer": transfer,
+        "total": total,
+        "reason": reason,
+    }
+
+def save_metacog_rubric_row(scores: dict, reason: str, signals: dict):
+    row = [
+        st.session_state.get("session_id", ""),
+        st.session_state.get("user", ""),
+        now_tr(),
+        st.session_state.get("metin_id", ""),
+        int(scores.get("planlama", 0)),
+        int(scores.get("izleme", 0)),
+        int(scores.get("degerlendirme", 0)),
+        int(scores.get("transfer", 0)),
+        int(scores.get("total", 0)),
+        (reason or "")[:500],
+        json.dumps(signals, ensure_ascii=False)[:45000],
+    ]
+    return append_row_safe("UstBilisselRubrik", row)
 
 # =========================================================
 # METİN BÖLME (OKUMA EKRANI İÇİN)
@@ -386,7 +478,6 @@ def load_activity_from_bank(metin_id: str):
     opts = option_letters_for_metin(metin_id)
 
     def get_opt(r, L):
-        # r'nin keyleri lower; yine de toleranslı olsun
         candidates = [L.lower(), L.lower().strip(), L.strip().lower()]
         for c in candidates:
             v = r.get(c)
@@ -531,6 +622,10 @@ def reset_activity_states():
     st.session_state.correct_with_hint = 0
     st.session_state.question_attempts = {}
     st.session_state.show_text_in_questions = False
+
+    # ✅ ÜSTBİLİŞSEL YANSITMA EKLENDİ
+    st.session_state.reflection_strategy = ""
+    st.session_state.reflection_next_time = ""
 
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
@@ -738,6 +833,23 @@ elif st.session_state.phase == "post":
             save_reading_process("POST_SUMMARY", st.session_state.summary, paragraf_no=None)
         st.success("✅ Özet kaydedildi!")
 
+    # ✅ ÜSTBİLİŞSEL YANSITMA EKLENDİ
+    st.divider()
+    st.subheader("🧠 Kendimi Değerlendiriyorum (Kısa)")
+
+    st.markdown("<div class='card'><b>Okurken zorlandığımda ne yaptım?</b><br/>1 cümle yaz.</div>", unsafe_allow_html=True)
+    r1 = st.text_input("Stratejim:", value=st.session_state.get("reflection_strategy", ""))
+
+    st.markdown("<div class='card'><b>Bir dahaki metinde neyi farklı yapacağım?</b><br/>1 cümle yaz.</div>", unsafe_allow_html=True)
+    r2 = st.text_input("Bir dahaki sefere:", value=st.session_state.get("reflection_next_time", ""))
+
+    if st.button("Kısa değerlendirmeyi kaydet ✅"):
+        st.session_state.reflection_strategy = (r1 or "").strip()
+        st.session_state.reflection_next_time = (r2 or "").strip()
+        save_reading_process("POST_REFLECTION_STRATEGY", st.session_state.reflection_strategy or "(boş)", paragraf_no=None)
+        save_reading_process("POST_REFLECTION_NEXT", st.session_state.reflection_next_time or "(boş)", paragraf_no=None)
+        st.success("✅ Kaydedildi!")
+
     st.divider()
     st.subheader("🗺️ Öykü Haritası (Story Map)")
     st.markdown("""
@@ -895,6 +1007,15 @@ elif st.session_state.phase == "questions":
 
             ok = append_row_safe("Performans", row)
             if ok:
+                # ✅ ÜSTBİLİŞSEL RUBRİK KAYDI EKLENDİ
+                try:
+                    sig = compute_metacog_signals()
+                    scores = rule_based_metacog_score(sig)
+                    save_metacog_rubric_row(scores, scores.get("reason", ""), sig)
+                    save_reading_process("METACOG_RUBRIC_SAVED", f"total={scores.get('total',0)}", paragraf_no=None)
+                except Exception:
+                    save_reading_process("METACOG_RUBRIC_ERROR", traceback.format_exc()[:2000], paragraf_no=None)
+
                 save_reading_process("SESSION_END", f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk", paragraf_no=None)
                 st.session_state.saved_perf = True
                 st.session_state.phase = "done"
