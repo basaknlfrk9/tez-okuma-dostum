@@ -8,25 +8,10 @@ from openai import RateLimitError, APIError, APITimeoutError
 import json, uuid, time, re, random, traceback
 from gtts import gTTS
 from io import BytesIO
+import pandas as pd
 
 # =========================================================
 # OKUMA DOSTUM — BANKA + SÜREÇ LOG (SINIF KALDIRILDI)
-#
-# MetinBankasi: metin_id | metin | baslik | pre_ipucu | (sinif olabilir ama kullanılmıyor)
-# SoruBankasi : metin_id | soru_no | kok | A | B | C | (D) | dogru | (sinif olabilir ama kullanılmıyor)
-#
-# SORU SAYISI:
-# - Metin_001..Metin_007: 6 soru
-# - Metin_008 ve sonrası: 7 soru
-#
-# ŞIK SAYISI:
-# - Metin_001..Metin_004: ABC
-# - Metin_005 ve sonrası: ABCD
-#
-# OKUMA EKRANI:
-# - Cümle ortasında kesmez
-# - Kısa parçaları birleştirir
-# - Hedef blok: 900-1400 karakter
 # =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
@@ -269,7 +254,7 @@ def openai_json_request(system_prompt, user_text, model="gpt-4o-mini", max_retri
                     {"role": "user", "content": user_text},
                 ],
                 response_format={"type": "json_object"},
-                temperature=temperature,  # ✅ daha stabil (sallamayı azaltır)
+                temperature=temperature,
             )
         except (RateLimitError, APIError, APITimeoutError):
             wait = min(2 ** attempt, 20) + random.uniform(0, 1.0)
@@ -341,8 +326,8 @@ def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
     append_row_safe("OkumaSüreci", row)
 
 # =========================================================
-# ÜSTBİLİŞSEL RUBRİK (KURAL TABANLI)
-# Google Sheet’te SEKME ADI: UstBilisselRubrik
+# ÜSTBİLİŞSEL RUBRİK (KURAL TABANLI) -> SHEETS'E KAYIT VAR, EKRANDA GÖSTERME YOK
+# Sheet sekmesi: UstBilisselRubrik (oluşturmalısın)
 # Kolonlar:
 # session_id | user | time | metin_id | planlama | izleme | degerlendirme | transfer | total | reason | signals_json
 # =========================================================
@@ -372,7 +357,6 @@ def compute_metacog_signals():
     }
 
 def rule_based_metacog_score(sig):
-    # PLANLAMA 0-2
     plan = 0
     if sig["prediction_len"] >= 5:
         plan += 1
@@ -380,7 +364,6 @@ def rule_based_metacog_score(sig):
         plan += 1
     plan = min(plan, 2)
 
-    # İZLEME 0-3
     monitor = 0
     if (sig["reread_count"] + sig["tts_count"]) >= 1:
         monitor += 1
@@ -390,7 +373,6 @@ def rule_based_metacog_score(sig):
         monitor += 1
     monitor = min(monitor, 3)
 
-    # DEĞERLENDİRME 0-3
     evals = 0
     if sig["summary_len"] >= 20:
         evals += 1
@@ -400,7 +382,6 @@ def rule_based_metacog_score(sig):
         evals += 1
     evals = min(evals, 3)
 
-    # TRANSFER 0-2
     transfer = 0
     if sig["reflection_next_len"] >= 8:
         transfer = 1
@@ -408,15 +389,8 @@ def rule_based_metacog_score(sig):
         transfer = 2
 
     total = plan + monitor + evals + transfer
-    reason = "Kural tabanlı: planlama(tahmin+dikkat), izleme(tekrar/tts/ipucu/deneme), değerlendirme(özet/önemli bilgi/story map), transfer(gelecek planı)."
-    return {
-        "planlama": plan,
-        "izleme": monitor,
-        "degerlendirme": evals,
-        "transfer": transfer,
-        "total": total,
-        "reason": reason,
-    }
+    reason = "Kural tabanlı rubrik (planlama/izleme/değerlendirme/transfer)."
+    return {"planlama": plan, "izleme": monitor, "degerlendirme": evals, "transfer": transfer, "total": total, "reason": reason}
 
 def save_metacog_rubric_row(scores: dict, reason: str, signals: dict):
     row = [
@@ -435,7 +409,7 @@ def save_metacog_rubric_row(scores: dict, reason: str, signals: dict):
     return append_row_safe("UstBilisselRubrik", row)
 
 # =========================================================
-# BANKA OKUMA (SINIF FİLTRESİ YOK)
+# BANKA OKUMA
 # =========================================================
 def list_metin_ids():
     rows = read_sheet_records("MetinBankasi")
@@ -465,7 +439,6 @@ def load_activity_from_bank(metin_id: str):
 
     qrows = read_sheet_records("SoruBankasi")
     qrows_n = [normrow(r) for r in qrows]
-
     match_q = [r for r in qrows_n if _norm(r.get("metin_id")) == _norm(metin_id)]
     if not match_q:
         return None, "SoruBankasi'nda bu metin_id için soru bulunamadı."
@@ -492,7 +465,6 @@ def load_activity_from_bank(metin_id: str):
         dogru = _norm(r.get("dogru")).upper() or opts[0]
         if dogru not in opts:
             dogru = opts[0]
-
         q_obj = {"kok": kok, "dogru": dogru}
         for L in opts:
             q_obj[L] = get_opt(r, L)
@@ -507,23 +479,11 @@ def load_activity_from_bank(metin_id: str):
     return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
 
 # =========================================================
-# STORY MAP AI (KANIT ŞARTI: "SALLAMA" YOK)
+# STORY MAP AI (SALLAMA YOK: KANIT METİNDE BİREBİR GEÇMELİ)
 # =========================================================
 def ai_score_story_map(metin: str, sm: dict):
     metin_short = (metin or "")[:4500]
     sm_safe = {k: (v or "")[:600] for k, v in (sm or {}).items()}
-
-    rubrik = """
-Rubrik (0-2):
-0 = boş / alakasız / metinle uyuşmuyor
-1 = kısmen doğru ama eksik / belirsiz
-2 = doğru ve metinle uyumlu (kısa da olsa doğru bilgi)
-
-ÇOK ÖNEMLİ KURAL:
-- Her alan için evidence metinden AYNEN kopyalanmış 3-12 kelimelik bir ifade olmalı.
-- Evidence metinde birebir geçmiyorsa: o alanın puanı 0 olmalı.
-- Evidence üretemiyorsan puan veremezsin.
-"""
 
     schema = """
 Sadece JSON üret:
@@ -533,14 +493,16 @@ Sadece JSON üret:
   "total": 0-12,
   "reason": "1-2 cümle Türkçe kısa gerekçe"
 }
-Kural: evidence metinde AYNEN geçmiyorsa ilgili score = 0 olmalı.
+KURALLAR:
+- Evidence her alan için metinden AYNEN kopyalanmış 3-12 kelime olmalı.
+- Evidence metinde birebir geçmiyorsa o alanın score'u 0 olmalı.
+- Evidence yoksa puan veremezsin.
 total = scores toplamı olmalı.
 """
 
     sys = f"""
 Sen özel eğitim/ÖÖG alanında deneyimli bir öğretmensin.
-İlköğretim düzeyine göre (5-6. sınıf bandı) değerlendir.
-{rubrik}
+İlköğretim düzeyi (5-6. sınıf bandı) için değerlendir.
 {schema}
 """
 
@@ -571,7 +533,7 @@ Sen özel eğitim/ÖÖG alanında deneyimli bir öğretmensin.
             return False
         if len(ev) < 8 or len(ev) > 120:
             return False
-        return ev.lower() in metin_l  # ✅ birebir kontrol
+        return ev.lower() in metin_l
 
     out = {}
     forced_zero = []
@@ -588,7 +550,6 @@ Sen özel eğitim/ÖÖG alanında deneyimli bir öğretmensin.
     reason = (data.get("reason") or "").strip()[:200]
     if forced_zero:
         reason = (reason + f" | Kanıt metinde yok: {', '.join(forced_zero)} → 0")[:200]
-
     return out, total, reason
 
 def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
@@ -651,12 +612,10 @@ def reset_activity_states():
     st.session_state.question_attempts = {}
     st.session_state.show_text_in_questions = False
 
-    # ✅ ÜSTBİLİŞSEL YANSITMA
     st.session_state.reflection_strategy = ""
     st.session_state.reflection_next_time = ""
 
-    # ✅ DONE ekranında göstermek için
-    st.session_state.metacog_last_total = None
+    st.session_state.last_report = {}
 
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
@@ -780,7 +739,6 @@ elif st.session_state.phase == "during":
     st.subheader("🟩 Okuma Sırası (DURING-READING)")
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
-
     metin_hash = hash(metin)
     if st.session_state.get("metin_hash") != metin_hash:
         st.session_state.paragraphs = split_paragraphs(metin, target_min=900, target_max=1400)
@@ -863,7 +821,6 @@ elif st.session_state.phase == "post":
             save_reading_process("POST_SUMMARY", st.session_state.summary, paragraf_no=None)
         st.success("✅ Özet kaydedildi!")
 
-    # ✅ ÜSTBİLİŞSEL YANSITMA
     st.divider()
     st.subheader("🧠 Kendimi Değerlendiriyorum (Kısa)")
 
@@ -1037,12 +994,29 @@ elif st.session_state.phase == "questions":
 
             ok = append_row_safe("Performans", row)
             if ok:
-                # ✅ ÜSTBİLİŞSEL RUBRİK KAYDI
+                # ✅ DONE ekranı için rapor (ilk app gibi)
+                st.session_state.last_report = {
+                    "basari_yuzde": basari_yuzde,
+                    "dogru": dogru,
+                    "total_q": total_q,
+                    "sure_dk": sure,
+                    "hints": int(st.session_state.get("hints", 0)),
+                    "prediction": (st.session_state.get("prediction", "") or "").strip(),
+                    "attention": "Evet" if st.session_state.get("attention_ok", False) else "Hayır",
+                    "speed": st.session_state.get("reading_speed", ""),
+                    "repeat_count": int(st.session_state.get("repeat_count", 0)),
+                    "tts_count": int(st.session_state.get("tts_count", 0)),
+                    "reread_count": int(st.session_state.get("reread_count", 0)),
+                    "important_note": (st.session_state.get("final_important_note", "") or "").strip(),
+                    "prior_knowledge": (st.session_state.get("prior_knowledge", "") or "").strip(),
+                    "summary": (st.session_state.get("summary", "") or "").strip(),
+                }
+
+                # ✅ Üstbilişsel rubrik: sadece sheets'e kaydet (ekranda göstermiyoruz)
                 try:
                     sig = compute_metacog_signals()
                     scores = rule_based_metacog_score(sig)
                     save_metacog_rubric_row(scores, scores.get("reason", ""), sig)
-                    st.session_state.metacog_last_total = scores.get("total", 0)  # ✅ DONE ekranı için
                     save_reading_process("METACOG_RUBRIC_SAVED", f"total={scores.get('total',0)}", paragraf_no=None)
                 except Exception:
                     save_reading_process("METACOG_RUBRIC_ERROR", traceback.format_exc()[:2000], paragraf_no=None)
@@ -1053,24 +1027,83 @@ elif st.session_state.phase == "questions":
                 st.rerun()
 
 # =========================================================
-# 7) DONE
+# 7) DONE (Öykü Haritası CEVAPLARI + AI SKOR + GRAFİK) — metacog skor YOK
 # =========================================================
 elif st.session_state.phase == "done":
     st.balloons()
     st.success("✅ Bugünkü çalışman kaydedildi!")
 
+    rep = st.session_state.get("last_report", {}) or {}
+
+    if rep:
+        st.subheader("📊 Bugünkü Skor Özeti")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f"<div class='card'><b>Başarı</b><br/>{rep.get('basari_yuzde','')}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>Doğru</b><br/>{rep.get('dogru',0)}/{rep.get('total_q',0)}</div>", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"<div class='card'><b>Süre</b><br/>{rep.get('sure_dk',0)} dk</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>İpucu</b><br/>{rep.get('hints',0)}</div>", unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"<div class='card'><b>Tekrar</b><br/>{rep.get('repeat_count',0)}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>Dinleme (TTS)</b><br/>{rep.get('tts_count',0)}</div>", unsafe_allow_html=True)
+
+        st.markdown(f"<div class='card'><b>Tahmin</b><br/>{rep.get('prediction','(boş)') or '(boş)'}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card'><b>Dikkat</b><br/>{rep.get('attention','')}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='card'><b>Okuma Hızı</b><br/>{rep.get('speed','')}</div>", unsafe_allow_html=True)
+
+        if rep.get("important_note"):
+            st.markdown(f"<div class='card'><b>Metnin En Önemli Şeyi</b><br/>{rep.get('important_note')}</div>", unsafe_allow_html=True)
+        if rep.get("prior_knowledge"):
+            st.markdown(f"<div class='card'><b>Ön Bilgi (Ne bildi?)</b><br/>{rep.get('prior_knowledge')}</div>", unsafe_allow_html=True)
+        if rep.get("summary"):
+            st.markdown(f"<div class='card'><b>Özet</b><br/>{rep.get('summary')}</div>", unsafe_allow_html=True)
+
+        st.divider()
+        st.subheader("📈 Grafikte Bugün Ne Yaptım?")
+        wrong = max(int(rep.get("total_q", 0)) - int(rep.get("dogru", 0)), 0)
+        df = pd.DataFrame(
+            {
+                "Değer": [
+                    float(rep.get("sure_dk", 0)),
+                    int(rep.get("dogru", 0)),
+                    int(wrong),
+                    int(rep.get("hints", 0)),
+                    int(rep.get("repeat_count", 0)),
+                    int(rep.get("tts_count", 0)),
+                    int(rep.get("reread_count", 0)),
+                ]
+            },
+            index=[
+                "Süre (dk)",
+                "Doğru",
+                "Yanlış",
+                "İpucu",
+                "Tekrar (toplam)",
+                "Dinleme (TTS)",
+                "Tekrar Okuma",
+            ],
+        )
+        st.bar_chart(df)
+
+    st.divider()
+    st.subheader("🗺️ Öykü Haritası Sonucun")
+    sm = st.session_state.get("story_map", {}) or {}
+    st.markdown(f"<div class='card'><b>👤 Kahraman(lar)</b><br/>{(sm.get('kahraman') or '(boş)')}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>🏠 Mekân</b><br/>{(sm.get('mekan') or '(boş)')}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>🕒 Zaman</b><br/>{(sm.get('zaman') or '(boş)')}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>⚠️ Problem</b><br/>{(sm.get('problem') or '(boş)')}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>🔁 Olaylar</b><br/>{(sm.get('olaylar') or '(boş)')}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>✅ Çözüm / Sonuç</b><br/>{(sm.get('cozum') or '(boş)')}</div>", unsafe_allow_html=True)
+
     sm_total = st.session_state.get("story_map_last_total")
     sm_reason = st.session_state.get("story_map_last_reason", "")
-    mc_total = st.session_state.get("metacog_last_total")
-
     if sm_total is not None:
         st.info(f"🗺️ Öykü Haritası (AI) Puanın: {sm_total}/12")
         if sm_reason:
             st.caption(f"Gerekçe: {sm_reason}")
 
-    if mc_total is not None:
-        st.info(f"🧠 Üstbilişsel Rubrik Puanın: {mc_total}/10")
-
+    st.divider()
     if st.button("Yeni Metin"):
         st.session_state.phase = "auth"
         st.session_state.metin_id = ""
