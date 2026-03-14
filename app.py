@@ -34,6 +34,14 @@ st.markdown("""
   }
   .small-note { color:#666; font-size:16px; }
   .card { background:#fff; padding:16px; border-radius:18px; border:1px solid #eee; margin-bottom:10px; }
+  .chat-user {
+    background:#eef6ff; padding:12px; border-radius:14px; margin-bottom:8px;
+    border:1px solid #d7e9ff;
+  }
+  .chat-bot {
+    background:#f7f7f7; padding:12px; border-radius:14px; margin-bottom:8px;
+    border:1px solid #e7e7e7;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -263,6 +271,122 @@ def openai_json_request(system_prompt, user_text, model="gpt-4o-mini", max_retri
     st.error("❌ OpenAI yoğunluğu çok fazla. Biraz sonra tekrar deneyin.")
     st.stop()
 
+def openai_text_request(system_prompt, user_text, model="gpt-4o-mini", max_retries=6, temperature=0.3):
+    for attempt in range(max_retries):
+        try:
+            return client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_text},
+                ],
+                temperature=temperature,
+            )
+        except (RateLimitError, APIError, APITimeoutError):
+            wait = min(2 ** attempt, 20) + random.uniform(0, 1.0)
+            st.warning(f"⚠️ Yoğunluk var, tekrar deneniyor... ({attempt+1}/{max_retries})")
+            time.sleep(wait)
+    st.error("❌ OpenAI yoğunluğu çok fazla. Biraz sonra tekrar deneyin.")
+    st.stop()
+
+# =========================================================
+# CHATBOT FONKSİYONLARI
+# =========================================================
+def generate_ai_hint(metin: str, soru: dict, wrong_choice: str):
+    opts_payload = {}
+    for k in ["A", "B", "C", "D"]:
+        if soru.get(k):
+            opts_payload[k] = soru.get(k)
+
+    sys = """
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan sabırlı bir okuma koçusun.
+Görevin cevabı doğrudan söylemeden kısa, anlaşılır ve yönlendirici bir ipucu vermek.
+Kurallar:
+- Türkçe yaz.
+- En fazla 2 cümle yaz.
+- Doğru seçeneği ASLA söyleme.
+- Öğrenciyi metindeki ilgili bölüme yönlendir.
+- Yaş düzeyine uygun ve motive edici ol.
+"""
+    payload = {
+        "metin": (metin or "")[:2500],
+        "soru": soru.get("kok", ""),
+        "seçenekler": opts_payload,
+        "ogrencinin_secimi": wrong_choice,
+        "dogru_cevap": soru.get("dogru", "")
+    }
+    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.2)
+    return resp.choices[0].message.content.strip()
+
+def generate_summary_feedback(metin: str, ozet: str):
+    sys = """
+Sen destekleyici bir okuma öğretmenisin.
+Öğrencinin özetine kısa geri bildirim ver.
+Kurallar:
+- Türkçe yaz.
+- En fazla 3 cümle olsun.
+- Önce güçlü yönünü söyle.
+- Sonra tek bir geliştirme önerisi ver.
+- Nazik ve açık ol.
+"""
+    payload = {
+        "metin": (metin or "")[:2500],
+        "ogrenci_ozeti": (ozet or "")[:1000]
+    }
+    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.3)
+    return resp.choices[0].message.content.strip()
+
+def generate_storymap_feedback(metin: str, sm: dict):
+    sys = """
+Sen öğrencinin öykü haritasını değerlendiren destekleyici bir öğretmensin.
+Kurallar:
+- Türkçe yaz.
+- En fazla 3 cümle olsun.
+- Önce iyi yaptığı bir şeyi söyle.
+- Sonra geliştirilebilecek en fazla 1 alanı belirt.
+- Cevabı doğrudan verme, yönlendirici ol.
+"""
+    payload = {
+        "metin": (metin or "")[:2500],
+        "story_map": sm
+    }
+    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.3)
+    return resp.choices[0].message.content.strip()
+
+def chat_about_text(metin: str, user_message: str, chat_history=None):
+    history = chat_history or []
+
+    messages = [
+        {
+            "role": "system",
+            "content": """
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine metin okuma desteği veren bir eğitim chatbotusun.
+Kurallar:
+- Türkçe yaz.
+- Kısa, açık ve motive edici ol.
+- Cevabı hemen vermek yerine öğrenciyi düşündür.
+- Öğrenciyi metindeki ipuçlarına yönlendir.
+- Metin dışına taşma.
+- Uygun olduğunda 'metinde hangi ifade bunu düşündürdü?' gibi yönlendirmeler yap.
+"""
+        }
+    ]
+
+    for item in history[-6:]:
+        messages.append({"role": item["role"], "content": item["content"]})
+
+    messages.append({
+        "role": "user",
+        "content": f"METİN:\n{(metin or '')[:3000]}\n\nÖĞRENCİ MESAJI:\n{user_message}"
+    })
+
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+        temperature=0.3,
+    )
+    return resp.choices[0].message.content.strip()
+
 # =========================================================
 # GOOGLE SHEETS
 # =========================================================
@@ -317,7 +441,7 @@ def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
         st.session_state.get("session_id", ""),
         st.session_state.get("user", ""),
         now_tr(),
-        "",  # sinif kaldırıldı -> boş
+        "",
         st.session_state.get("metin_id", ""),
         paragraf_no if paragraf_no is not None else "",
         kayit_turu,
@@ -326,10 +450,7 @@ def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
     append_row_safe("OkumaSüreci", row)
 
 # =========================================================
-# ÜSTBİLİŞSEL RUBRİK (KURAL TABANLI) -> SHEETS'E KAYIT VAR, EKRANDA GÖSTERME YOK
-# Sheet sekmesi: UstBilisselRubrik (oluşturmalısın)
-# Kolonlar:
-# session_id | user | time | metin_id | planlama | izleme | degerlendirme | transfer | total | reason | signals_json
+# ÜSTBİLİŞSEL RUBRİK (KURAL TABANLI)
 # =========================================================
 def compute_metacog_signals():
     qa = st.session_state.get("question_attempts", {}) or {}
@@ -479,7 +600,7 @@ def load_activity_from_bank(metin_id: str):
     return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
 
 # =========================================================
-# STORY MAP AI (SALLAMA YOK: KANIT METİNDE BİREBİR GEÇMELİ)
+# STORY MAP AI
 # =========================================================
 def ai_score_story_map(metin: str, sm: dict):
     metin_short = (metin or "")[:4500]
@@ -497,7 +618,7 @@ KURALLAR:
 - Evidence her alan için metinden AYNEN kopyalanmış 3-12 kelime olmalı.
 - Evidence metinde birebir geçmiyorsa o alanın score'u 0 olmalı.
 - Evidence yoksa puan veremezsin.
-total = scores toplamı olmalı.
+- total = scores toplamı olmalı.
 """
 
     sys = f"""
@@ -557,7 +678,7 @@ def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
         st.session_state.get("session_id", ""),
         st.session_state.get("user", ""),
         now_tr(),
-        "",  # sinif kaldırıldı -> boş
+        "",
         st.session_state.get("metin_id", ""),
         sm.get("kahraman", ""),
         sm.get("mekan", ""),
@@ -616,6 +737,12 @@ def reset_activity_states():
     st.session_state.reflection_next_time = ""
 
     st.session_state.last_report = {}
+
+    # chatbot alanları
+    st.session_state.ai_hint_text = ""
+    st.session_state.summary_feedback = ""
+    st.session_state.storymap_feedback = ""
+    st.session_state.chat_messages = []
 
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
@@ -780,6 +907,33 @@ elif st.session_state.phase == "during":
             if st.button("➡️ Sonraki bölüm", key=f"next_p_{p_idx}"):
                 st.session_state.p_idx = p_idx + 1
                 st.rerun()
+
+        st.divider()
+        st.subheader("🤖 Okuma Dostum ile Konuş")
+        user_msg = st.text_input("Metinle ilgili bir şey sor veya yardım iste:", key=f"chat_input_during_{p_idx}")
+
+        if st.button("Gönder", key=f"send_chat_during_{p_idx}") and user_msg.strip():
+            try:
+                reply = chat_about_text(
+                    metin=metin,
+                    user_message=user_msg.strip(),
+                    chat_history=st.session_state.get("chat_messages", [])
+                )
+                st.session_state.chat_messages.append({"role": "user", "content": user_msg.strip()})
+                st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+                save_reading_process("CHAT_USER", user_msg.strip(), paragraf_no=p_idx + 1)
+                save_reading_process("CHATBOT_REPLY", reply, paragraf_no=p_idx + 1)
+                st.rerun()
+            except Exception:
+                st.warning("Şu anda chatbot yanıtı üretilemedi.")
+
+        if st.session_state.get("chat_messages"):
+            for msg in st.session_state.chat_messages[-6:]:
+                if msg["role"] == "user":
+                    st.markdown(f"<div class='chat-user'><b>Sen:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div class='chat-bot'><b>Okuma Dostum:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
+
     else:
         st.markdown("<div class='card'><b>Metnin En Önemli Şeyi</b><br/>Sence bu metindeki en önemli şey neydi? (1 cümle)</div>", unsafe_allow_html=True)
         st.session_state.final_important_note = st.text_input("En önemli şey:", value=st.session_state.final_important_note)
@@ -819,7 +973,16 @@ elif st.session_state.phase == "post":
         st.session_state.summary = summ.strip()
         if st.session_state.summary:
             save_reading_process("POST_SUMMARY", st.session_state.summary, paragraf_no=None)
+            try:
+                fb = generate_summary_feedback(metin, st.session_state.summary)
+                st.session_state.summary_feedback = fb
+                save_reading_process("AI_SUMMARY_FEEDBACK", fb, paragraf_no=None)
+            except Exception:
+                st.session_state.summary_feedback = ""
         st.success("✅ Özet kaydedildi!")
+
+    if st.session_state.get("summary_feedback"):
+        st.info(f"🤖 Chatbot geri bildirimi: {st.session_state.summary_feedback}")
 
     st.divider()
     st.subheader("🧠 Kendimi Değerlendiriyorum (Kısa)")
@@ -873,6 +1036,14 @@ elif st.session_state.phase == "post":
                     st.session_state.story_map_last_total = total
                     st.session_state.story_map_last_reason = reason
                     save_reading_process("STORY_MAP_SCORED", f"{total}/12 | {reason}", paragraf_no=None)
+
+                    try:
+                        sm_fb = generate_storymap_feedback(metin, sm)
+                        st.session_state.storymap_feedback = sm_fb
+                        save_reading_process("AI_STORYMAP_FEEDBACK", sm_fb, paragraf_no=None)
+                    except Exception:
+                        st.session_state.storymap_feedback = ""
+
                     st.success(f"✅ Kaydedildi! AI Puan: {total}/12")
                     st.caption(f"Gerekçe: {reason}")
 
@@ -882,6 +1053,9 @@ elif st.session_state.phase == "post":
             else "<div class='small-note'>AI Puan: ⏳</div>",
             unsafe_allow_html=True
         )
+
+    if st.session_state.get("storymap_feedback"):
+        st.info(f"🤖 Chatbot yorumu: {st.session_state.storymap_feedback}")
 
     if st.button("Sorulara Geç ➜"):
         st.session_state.phase = "questions"
@@ -937,16 +1111,33 @@ elif st.session_state.phase == "questions":
 
                 if is_correct:
                     st.success("🌟 Doğru!")
+                    st.session_state.ai_hint_text = ""
                     st.session_state.q_idx = i + 1
                     st.rerun()
                 else:
                     st.error("Tekrar dene!")
+                    try:
+                        ai_hint = generate_ai_hint(metin, q, opt)
+                        st.session_state.ai_hint_text = ai_hint
+                        save_reading_process("AI_HINT_AUTO", f"Soru {i+1} | {ai_hint}", paragraf_no=None)
+                    except Exception:
+                        st.session_state.ai_hint_text = "Metinde bu soruyla ilgili bölümü tekrar incele."
+
+        if st.session_state.get("ai_hint_text"):
+            st.info(f"🤖 Chatbot ipucu: {st.session_state.ai_hint_text}")
 
         if st.button("💡 İpucu Al", key=f"hint_{i}"):
             st.session_state.hints += 1
             st.session_state.show_text_in_questions = True
             save_reading_process("HINT", f"Soru {i+1} | ipucu_alindi", paragraf_no=None)
-            st.info("📌 Metni '📄 Metin' bölümünde açtım. Anahtar kelimeleri metinde ara ve ilgili bölümü tekrar oku.")
+
+            try:
+                ai_hint = generate_ai_hint(metin, q, "İpucu istendi")
+                st.session_state.ai_hint_text = ai_hint
+                save_reading_process("AI_HINT_MANUAL", f"Soru {i+1} | {ai_hint}", paragraf_no=None)
+                st.info(f"🤖 Chatbot ipucu: {ai_hint}")
+            except Exception:
+                st.info("📌 Metni açtım. Anahtar kelimeleri metinde ara ve ilgili bölümü tekrar oku.")
 
     else:
         if not st.session_state.saved_perf:
@@ -971,7 +1162,7 @@ elif st.session_state.phase == "questions":
                 st.session_state.user,
                 st.session_state.login_time,
                 sure,
-                "",  # sinif kaldırıldı -> boş
+                "",
                 basari_yuzde,
                 total_q,
                 dogru,
@@ -994,7 +1185,6 @@ elif st.session_state.phase == "questions":
 
             ok = append_row_safe("Performans", row)
             if ok:
-                # ✅ DONE ekranı için rapor (ilk app gibi)
                 st.session_state.last_report = {
                     "basari_yuzde": basari_yuzde,
                     "dogru": dogru,
@@ -1012,7 +1202,6 @@ elif st.session_state.phase == "questions":
                     "summary": (st.session_state.get("summary", "") or "").strip(),
                 }
 
-                # ✅ Üstbilişsel rubrik: sadece sheets'e kaydet (ekranda göstermiyoruz)
                 try:
                     sig = compute_metacog_signals()
                     scores = rule_based_metacog_score(sig)
@@ -1027,7 +1216,7 @@ elif st.session_state.phase == "questions":
                 st.rerun()
 
 # =========================================================
-# 7) DONE (Öykü Haritası CEVAPLARI + AI SKOR + GRAFİK) — metacog skor YOK
+# 7) DONE
 # =========================================================
 elif st.session_state.phase == "done":
     st.balloons()
@@ -1102,6 +1291,12 @@ elif st.session_state.phase == "done":
         st.info(f"🗺️ Öykü Haritası (AI) Puanın: {sm_total}/12")
         if sm_reason:
             st.caption(f"Gerekçe: {sm_reason}")
+
+    if st.session_state.get("summary_feedback"):
+        st.markdown(f"<div class='card'><b>🤖 Özet Geri Bildirimi</b><br/>{st.session_state.get('summary_feedback')}</div>", unsafe_allow_html=True)
+
+    if st.session_state.get("storymap_feedback"):
+        st.markdown(f"<div class='card'><b>🤖 Öykü Haritası Yorumu</b><br/>{st.session_state.get('storymap_feedback')}</div>", unsafe_allow_html=True)
 
     st.divider()
     if st.button("Yeni Metin"):
