@@ -738,7 +738,6 @@ def reset_activity_states():
 
     st.session_state.last_report = {}
 
-    # chatbot alanları
     st.session_state.ai_hint_text = ""
     st.session_state.summary_feedback = ""
     st.session_state.storymap_feedback = ""
@@ -807,7 +806,6 @@ elif st.session_state.phase == "setup":
             st.stop()
 
         st.session_state.activity = activity
-
         st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
         st.session_state.p_idx = 0
 
@@ -907,33 +905,6 @@ elif st.session_state.phase == "during":
             if st.button("➡️ Sonraki bölüm", key=f"next_p_{p_idx}"):
                 st.session_state.p_idx = p_idx + 1
                 st.rerun()
-
-        st.divider()
-        st.subheader("🤖 Okuma Dostum ile Konuş")
-        user_msg = st.text_input("Metinle ilgili bir şey sor veya yardım iste:", key=f"chat_input_during_{p_idx}")
-
-        if st.button("Gönder", key=f"send_chat_during_{p_idx}") and user_msg.strip():
-            try:
-                reply = chat_about_text(
-                    metin=metin,
-                    user_message=user_msg.strip(),
-                    chat_history=st.session_state.get("chat_messages", [])
-                )
-                st.session_state.chat_messages.append({"role": "user", "content": user_msg.strip()})
-                st.session_state.chat_messages.append({"role": "assistant", "content": reply})
-                save_reading_process("CHAT_USER", user_msg.strip(), paragraf_no=p_idx + 1)
-                save_reading_process("CHATBOT_REPLY", reply, paragraf_no=p_idx + 1)
-                st.rerun()
-            except Exception:
-                st.warning("Şu anda chatbot yanıtı üretilemedi.")
-
-        if st.session_state.get("chat_messages"):
-            for msg in st.session_state.chat_messages[-6:]:
-                if msg["role"] == "user":
-                    st.markdown(f"<div class='chat-user'><b>Sen:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
-                else:
-                    st.markdown(f"<div class='chat-bot'><b>Okuma Dostum:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
-
     else:
         st.markdown("<div class='card'><b>Metnin En Önemli Şeyi</b><br/>Sence bu metindeki en önemli şey neydi? (1 cümle)</div>", unsafe_allow_html=True)
         st.session_state.final_important_note = st.text_input("En önemli şey:", value=st.session_state.final_important_note)
@@ -1056,6 +1027,37 @@ elif st.session_state.phase == "post":
 
     if st.session_state.get("storymap_feedback"):
         st.info(f"🤖 Chatbot yorumu: {st.session_state.storymap_feedback}")
+
+    st.divider()
+    st.subheader("🤖 Okuma Dostum ile Konuş")
+
+    chat_container = st.container()
+    with chat_container:
+        if st.session_state.get("chat_messages"):
+            for msg in st.session_state.chat_messages:
+                if msg["role"] == "user":
+                    st.markdown(f"<div class='chat-user'><b>Sen:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
+                else:
+                    st.markdown(f"<div class='chat-bot'><b>Okuma Dostum:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
+
+    st.divider()
+
+    user_msg = st.text_input("Metinle ilgili bir şey sor veya yardım iste:", key="chat_input_post")
+
+    if st.button("Gönder", key="send_chat_post") and user_msg.strip():
+        try:
+            reply = chat_about_text(
+                metin=metin,
+                user_message=user_msg.strip(),
+                chat_history=st.session_state.get("chat_messages", [])
+            )
+            st.session_state.chat_messages.append({"role": "user", "content": user_msg.strip()})
+            st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+            save_reading_process("CHAT_USER", user_msg.strip(), paragraf_no=None)
+            save_reading_process("CHATBOT_REPLY", reply, paragraf_no=None)
+            st.rerun()
+        except Exception:
+            st.warning("Şu anda chatbot yanıtı üretilemedi.")
 
     if st.button("Sorulara Geç ➜"):
         st.session_state.phase = "questions"
