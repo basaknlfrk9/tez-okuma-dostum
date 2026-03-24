@@ -600,7 +600,7 @@ def load_activity_from_bank(metin_id: str):
     return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
 
 # =========================================================
-# STORY MAP AI (DÜZELTİLDİ)
+# STORY MAP AI (HIBRIT: KURAL + LLM)
 # =========================================================
 def _tr_lower(s: str) -> str:
     s = str(s or "")
@@ -620,7 +620,7 @@ def _tokenize_story_text(s: str):
     s = _normalize_story_text(s)
     return [t for t in s.split() if len(t) >= 2]
 
-def _find_best_evidence_span(metin: str, answer: str, max_words: int = 12) -> str:
+def _find_best_evidence_span(metin: str, answer: str, max_words: int = 14) -> str:
     metin = str(metin or "")
     answer = str(answer or "").strip()
     if not metin or not answer:
@@ -644,9 +644,9 @@ def _find_best_evidence_span(metin: str, answer: str, max_words: int = 12) -> st
 
         overlap = ans_set & sent_tokens
         coverage = len(overlap) / max(len(ans_set), 1)
-        substring_bonus = 0.3 if _normalize_story_text(answer) in sent_clean else 0
-
+        substring_bonus = 0.35 if _normalize_story_text(answer) in sent_clean else 0
         score = coverage + substring_bonus
+
         if score > best_score:
             best_score = score
             best_sent = sent.strip()
@@ -657,59 +657,159 @@ def _find_best_evidence_span(metin: str, answer: str, max_words: int = 12) -> st
     words = best_sent.split()
     if len(words) <= max_words:
         return best_sent
-
     return " ".join(words[:max_words])
 
-def _score_single_story_field(answer: str, metin: str):
+def _score_single_story_field_rule(answer: str, metin: str):
     answer = str(answer or "").strip()
     if not answer:
-        return 0, ""
+        return 0, "", "Boş cevap"
 
     ans_norm = _normalize_story_text(answer)
     ans_tokens = set(_tokenize_story_text(answer))
-
     if not ans_tokens:
-        return 0, ""
+        return 0, "", "Anlamlı kelime yok"
 
     metin_norm = _normalize_story_text(metin)
     evidence = _find_best_evidence_span(metin, answer)
 
-    if ans_norm in metin_norm:
-        return 2, evidence or answer
+    # 1) Tam ifade metinde geçiyorsa
+    if ans_norm and ans_norm in metin_norm:
+        return 2, evidence or answer, "Metinde doğrudan geçti"
 
+    # 2) Token bazlı eşleşme
     metin_tokens = set(_tokenize_story_text(metin))
     overlap = ans_tokens & metin_tokens
-    coverage = len(overlap) / len(ans_tokens)
+    coverage = len(overlap) / max(len(ans_tokens), 1)
 
+    # Tek kelimelik güçlü cevap
     if len(ans_tokens) == 1 and len(overlap) == 1:
-        return 2, evidence or answer
+        return 2, evidence or answer, "Tek kelimelik doğrudan eşleşme"
 
-    if coverage >= 0.8:
-        return 2, evidence or answer
-    elif coverage >= 0.4:
-        return 1, evidence or answer
+    if coverage >= 0.80:
+        return 2, evidence or answer, "Güçlü kelime eşleşmesi"
+    elif coverage >= 0.40:
+        return 1, evidence or answer, "Kısmi kelime eşleşmesi"
     else:
-        return 0, ""
+        return 0, "", "Kelime eşleşmesi zayıf"
+
+def _llm_semantic_score(field_name: str, answer: str, metin: str):
+    answer = str(answer or "").strip()
+    if not answer:
+        return 0, "", "Boş cevap"
+
+    metin_short = (metin or "")[:5000]
+
+    sys = f"""
+Sen ilkokul/ortaokul düzeyinde öykü haritası puanlayan dikkatli bir öğretmensin.
+
+Alan: {field_name}
+
+Görevin:
+Öğrenci cevabının metin tarafından ANLAMSAL olarak desteklenip desteklenmediğini değerlendir.
+
+0 puan:
+- Cevap metinle uyuşmuyor
+- Metinde destek yok
+- Çok alakasız / yanlış
+
+1 puan:
+- Cevap kısmen doğru
+- Eksik, çok genel veya belirsiz
+- Metinle zayıf/orta düzey uyumlu
+
+2 puan:
+- Cevap metindeki bilgiyle açıkça uyumlu
+- Öğrenci farklı kelimeler kullansa bile anlam doğru
+
+Kurallar:
+- Sadece JSON üret.
+- evidence alanı metinden kısa bir ifade olsun.
+- evidence birebir metinden alınmış kısa bir bölüm olsun.
+- reason çok kısa olsun.
+
+JSON şeması:
+{{
+  "score": 0,
+  "evidence": "",
+  "reason": ""
+}}
+"""
+
+    user = json.dumps({
+        "alan": field_name,
+        "ogrenci_cevabi": answer,
+        "metin": metin_short
+    }, ensure_ascii=False)
+
+    try:
+        resp = openai_json_request(sys, user, model="gpt-4o-mini", temperature=0)
+        raw = resp.choices[0].message.content
+        data = json.loads(raw)
+
+        score = int(data.get("score", 0))
+        if score < 0:
+            score = 0
+        if score > 2:
+            score = 2
+
+        evidence = str(data.get("evidence", "") or "").strip()[:180]
+        reason = str(data.get("reason", "") or "").strip()[:160]
+
+        return score, evidence, reason
+    except Exception:
+        return 0, "", "LLM puanı alınamadı"
 
 def ai_score_story_map(metin: str, sm: dict):
     alanlar = ["kahraman", "mekan", "zaman", "problem", "olaylar", "cozum"]
 
+    # Net alanlar: önce kural güçlü çalışsın
+    kural_agirlikli = {"kahraman", "mekan", "zaman"}
+
+    # Yoruma açık alanlar: gerektiğinde LLM devreye girsin
+    hibrit_alanlar = {"problem", "olaylar", "cozum"}
+
     out = {}
-    evidences = {}
-    notes = []
+    reasons = {}
 
     for key in alanlar:
-        score, ev = _score_single_story_field(sm.get(key, ""), metin)
-        out[key] = int(score)
-        evidences[key] = ev
-        if score == 0 and str(sm.get(key, "")).strip():
-            notes.append(key)
+        answer = sm.get(key, "")
+
+        rule_score, rule_ev, rule_reason = _score_single_story_field_rule(answer, metin)
+
+        if key in kural_agirlikli:
+            out[key] = int(rule_score)
+            reasons[key] = rule_reason
+            continue
+
+        # Hibrit alanlar
+        if not str(answer or "").strip():
+            out[key] = 0
+            reasons[key] = "Boş cevap"
+            continue
+
+        # Kural zaten güçlü ise direkt kullan
+        if rule_score == 2:
+            out[key] = 2
+            reasons[key] = "Kural tabanlı güçlü eşleşme"
+            continue
+
+        # Belirsiz veya zayıfsa LLM anlamsal karar versin
+        llm_score, llm_ev, llm_reason = _llm_semantic_score(key, answer, metin)
+
+        # Güvenlik mantığı:
+        # - LLM 2 dediyse 2
+        # - LLM 1 dediyse 1
+        # - LLM 0 dediyse ama kural 1 ise 1'i koru
+        final_score = max(rule_score, llm_score)
+
+        out[key] = int(final_score)
+        reasons[key] = llm_reason or rule_reason or "Değerlendirildi"
 
     total = sum(out.values())
 
     iyi = [k for k, v in out.items() if v == 2]
     orta = [k for k, v in out.items() if v == 1]
-    zayif = [k for k, v in out.items() if v == 0 and sm.get(k)]
+    zayif = [k for k, v in out.items() if v == 0 and str(sm.get(k, "")).strip()]
 
     parts = []
     if iyi:
@@ -720,6 +820,8 @@ def ai_score_story_map(metin: str, sm: dict):
         parts.append("Zayıf: " + ", ".join(zayif))
 
     reason = " | ".join(parts) if parts else "Tamamlandı"
+    reason = reason[:220]
+
     return out, total, reason
 
 def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
