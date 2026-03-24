@@ -600,77 +600,126 @@ def load_activity_from_bank(metin_id: str):
     return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
 
 # =========================================================
-# STORY MAP AI
+# STORY MAP AI (DÜZELTİLDİ)
 # =========================================================
+def _tr_lower(s: str) -> str:
+    s = str(s or "")
+    repl = str.maketrans({
+        "I": "ı", "İ": "i",
+        "Ş": "ş", "Ğ": "ğ", "Ü": "ü", "Ö": "ö", "Ç": "ç"
+    })
+    return s.translate(repl).lower()
+
+def _normalize_story_text(s: str) -> str:
+    s = _tr_lower(s)
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _tokenize_story_text(s: str):
+    s = _normalize_story_text(s)
+    return [t for t in s.split() if len(t) >= 2]
+
+def _find_best_evidence_span(metin: str, answer: str, max_words: int = 12) -> str:
+    metin = str(metin or "")
+    answer = str(answer or "").strip()
+    if not metin or not answer:
+        return ""
+
+    answer_tokens = _tokenize_story_text(answer)
+    if not answer_tokens:
+        return ""
+
+    sentences = re.split(r"(?<=[.!?…])\s+|\n+", metin)
+
+    best_sent = ""
+    best_score = 0.0
+    ans_set = set(answer_tokens)
+
+    for sent in sentences:
+        sent_clean = _normalize_story_text(sent)
+        sent_tokens = set(sent_clean.split())
+        if not sent_tokens:
+            continue
+
+        overlap = ans_set & sent_tokens
+        coverage = len(overlap) / max(len(ans_set), 1)
+        substring_bonus = 0.3 if _normalize_story_text(answer) in sent_clean else 0
+
+        score = coverage + substring_bonus
+        if score > best_score:
+            best_score = score
+            best_sent = sent.strip()
+
+    if best_score == 0:
+        return ""
+
+    words = best_sent.split()
+    if len(words) <= max_words:
+        return best_sent
+
+    return " ".join(words[:max_words])
+
+def _score_single_story_field(answer: str, metin: str):
+    answer = str(answer or "").strip()
+    if not answer:
+        return 0, ""
+
+    ans_norm = _normalize_story_text(answer)
+    ans_tokens = set(_tokenize_story_text(answer))
+
+    if not ans_tokens:
+        return 0, ""
+
+    metin_norm = _normalize_story_text(metin)
+    evidence = _find_best_evidence_span(metin, answer)
+
+    if ans_norm in metin_norm:
+        return 2, evidence or answer
+
+    metin_tokens = set(_tokenize_story_text(metin))
+    overlap = ans_tokens & metin_tokens
+    coverage = len(overlap) / len(ans_tokens)
+
+    if len(ans_tokens) == 1 and len(overlap) == 1:
+        return 2, evidence or answer
+
+    if coverage >= 0.8:
+        return 2, evidence or answer
+    elif coverage >= 0.4:
+        return 1, evidence or answer
+    else:
+        return 0, ""
+
 def ai_score_story_map(metin: str, sm: dict):
-    metin_short = (metin or "")[:4500]
-    sm_safe = {k: (v or "")[:600] for k, v in (sm or {}).items()}
-
-    schema = """
-Sadece JSON üret:
-{
-  "scores": {"kahraman":0|1|2,"mekan":0|1|2,"zaman":0|1|2,"problem":0|1|2,"olaylar":0|1|2,"cozum":0|1|2},
-  "evidence": {"kahraman":"...","mekan":"...","zaman":"...","problem":"...","olaylar":"...","cozum":"..."},
-  "total": 0-12,
-  "reason": "1-2 cümle Türkçe kısa gerekçe"
-}
-KURALLAR:
-- Evidence her alan için metinden AYNEN kopyalanmış 3-12 kelime olmalı.
-- Evidence metinde birebir geçmiyorsa o alanın score'u 0 olmalı.
-- Evidence yoksa puan veremezsin.
-- total = scores toplamı olmalı.
-"""
-
-    sys = f"""
-Sen özel eğitim/ÖÖG alanında deneyimli bir öğretmensin.
-İlköğretim düzeyi (5-6. sınıf bandı) için değerlendir.
-{schema}
-"""
-
-    user = json.dumps({"metin": metin_short, "story_map": sm_safe}, ensure_ascii=False)
-    resp = openai_json_request(sys, user, model="gpt-4o-mini", temperature=0)
-
-    raw = resp.choices[0].message.content
-    try:
-        data = json.loads(raw)
-    except Exception:
-        data = {"scores": {}, "evidence": {}, "total": 0, "reason": "AI çıktısı okunamadı."}
-
-    scores = data.get("scores", {}) or {}
-    evidence = data.get("evidence", {}) or {}
-
-    def clamp02(x):
-        try:
-            x = int(x)
-        except Exception:
-            x = 0
-        return 0 if x < 0 else 2 if x > 2 else x
-
-    metin_l = metin_short.lower()
-
-    def evidence_ok(ev: str) -> bool:
-        ev = (ev or "").strip()
-        if not ev:
-            return False
-        if len(ev) < 8 or len(ev) > 120:
-            return False
-        return ev.lower() in metin_l
+    alanlar = ["kahraman", "mekan", "zaman", "problem", "olaylar", "cozum"]
 
     out = {}
-    forced_zero = []
-    for key in ["kahraman", "mekan", "zaman", "problem", "olaylar", "cozum"]:
-        s = clamp02(scores.get(key, 0))
-        ev = evidence.get(key, "")
-        if not evidence_ok(ev):
-            if s != 0:
-                forced_zero.append(key)
-            s = 0
-        out[key] = s
+    evidences = {}
+    notes = []
+
+    for key in alanlar:
+        score, ev = _score_single_story_field(sm.get(key, ""), metin)
+        out[key] = int(score)
+        evidences[key] = ev
+        if score == 0 and str(sm.get(key, "")).strip():
+            notes.append(key)
 
     total = sum(out.values())
-    reason = (data.get("reason") or "").strip()[:200]
-    if forced_zero:
-        reason = (reason + f" | Kanıt metinde yok: {', '.join(forced_zero)} → 0")[:200]
+
+    iyi = [k for k, v in out.items() if v == 2]
+    orta = [k for k, v in out.items() if v == 1]
+    zayif = [k for k, v in out.items() if v == 0 and sm.get(k)]
+
+    parts = []
+    if iyi:
+        parts.append("Güçlü: " + ", ".join(iyi))
+    if orta:
+        parts.append("Kısmi: " + ", ".join(orta))
+    if zayif:
+        parts.append("Zayıf: " + ", ".join(zayif))
+
+    reason = " | ".join(parts) if parts else "Tamamlandı"
     return out, total, reason
 
 def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
