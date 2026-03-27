@@ -339,12 +339,15 @@ Kurallar:
 def generate_storymap_feedback(metin: str, sm: dict):
     sys = """
 Sen öğrencinin öykü haritasını değerlendiren destekleyici bir öğretmensin.
+
 Kurallar:
 - Türkçe yaz.
 - En fazla 3 cümle olsun.
-- Önce iyi yaptığı bir şeyi söyle.
-- Sonra geliştirilebilecek en fazla 1 alanı belirt.
-- Cevabı doğrudan verme, yönlendirici ol.
+- İlk cümlede öğrencinin iyi yaptığı bir şeyi söyle.
+- İkinci cümlede sadece 1 geliştirme önerisi ver.
+- Cevabı doğrudan verme.
+- Nazik, motive edici ve kısa ol.
+- Özel öğrenme güçlüğü yaşayan bir öğrenciyle konuşuyormuş gibi açık yaz.
 """
     payload = {
         "metin": (metin or "")[:2500],
@@ -600,7 +603,7 @@ def load_activity_from_bank(metin_id: str):
     return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
 
 # =========================================================
-# STORY MAP AI (HIBRIT: KURAL + LLM)
+# STORY MAP AI (DAHA GÜÇLÜ HİBRİT: EŞDEĞER ANLAM + LLM)
 # =========================================================
 def _tr_lower(s: str) -> str:
     s = str(s or "")
@@ -620,38 +623,58 @@ def _tokenize_story_text(s: str):
     s = _normalize_story_text(s)
     return [t for t in s.split() if len(t) >= 2]
 
-def _find_best_evidence_span(metin: str, answer: str, max_words: int = 14) -> str:
+def _story_replace_synonyms(s: str) -> str:
+    s = " " + _normalize_story_text(s) + " "
+
+    synonym_map = {
+        "yuva": ["ev", "evi", "barinak", "barınağı", "barinagi"],
+        "yikildi": ["bozuldu", "zarar gordu", "zarar gördü", "dagildi", "dağıldı", "coktu", "çöktü"],
+        "kus": ["kuş", "yavru kus", "yavru kuş", "kucuk kus", "küçük kuş"],
+        "uzuldu": ["uzgun", "üzgün", "cok uzuldu", "çok üzüldü"],
+        "yardim": ["destek", "yardim etti", "yardım etti", "yardimci oldu", "yardımcı oldu"],
+        "orman": ["agaclik", "ağaçlık", "agac", "ağaç"],
+        "sabah": ["gunduz", "gündüz", "erken", "sabah vakti"],
+        "cozum": ["sonuc", "sonuç", "care", "çare"]
+    }
+
+    for canon, variants in synonym_map.items():
+        for v in variants:
+            s = s.replace(f" {v} ", f" {canon} ")
+
+    return re.sub(r"\s+", " ", s).strip()
+
+def _find_best_evidence_span(metin: str, answer: str, max_words: int = 16) -> str:
     metin = str(metin or "")
     answer = str(answer or "").strip()
     if not metin or not answer:
         return ""
 
-    answer_tokens = _tokenize_story_text(answer)
-    if not answer_tokens:
+    ans_norm = _story_replace_synonyms(answer)
+    ans_tokens = set(ans_norm.split())
+    if not ans_tokens:
         return ""
 
     sentences = re.split(r"(?<=[.!?…])\s+|\n+", metin)
 
     best_sent = ""
     best_score = 0.0
-    ans_set = set(answer_tokens)
 
     for sent in sentences:
-        sent_clean = _normalize_story_text(sent)
-        sent_tokens = set(sent_clean.split())
+        sent_norm = _story_replace_synonyms(sent)
+        sent_tokens = set(sent_norm.split())
         if not sent_tokens:
             continue
 
-        overlap = ans_set & sent_tokens
-        coverage = len(overlap) / max(len(ans_set), 1)
-        substring_bonus = 0.35 if _normalize_story_text(answer) in sent_clean else 0
+        overlap = ans_tokens & sent_tokens
+        coverage = len(overlap) / max(len(ans_tokens), 1)
+        substring_bonus = 0.35 if ans_norm in sent_norm else 0
         score = coverage + substring_bonus
 
         if score > best_score:
             best_score = score
             best_sent = sent.strip()
 
-    if best_score == 0:
+    if best_score <= 0:
         return ""
 
     words = best_sent.split()
@@ -659,31 +682,43 @@ def _find_best_evidence_span(metin: str, answer: str, max_words: int = 14) -> st
         return best_sent
     return " ".join(words[:max_words])
 
-def _score_single_story_field_rule(answer: str, metin: str):
+def _score_single_story_field_rule(answer: str, metin: str, field_name: str = ""):
     answer = str(answer or "").strip()
     if not answer:
         return 0, "", "Boş cevap"
 
-    ans_norm = _normalize_story_text(answer)
-    ans_tokens = set(_tokenize_story_text(answer))
+    raw_answer_norm = _normalize_story_text(answer)
+    smart_answer_norm = _story_replace_synonyms(answer)
+
+    ans_tokens = set(smart_answer_norm.split())
     if not ans_tokens:
         return 0, "", "Anlamlı kelime yok"
 
-    metin_norm = _normalize_story_text(metin)
+    raw_metin_norm = _normalize_story_text(metin)
+    smart_metin_norm = _story_replace_synonyms(metin)
+
     evidence = _find_best_evidence_span(metin, answer)
 
-    # 1) Tam ifade metinde geçiyorsa
-    if ans_norm and ans_norm in metin_norm:
+    if raw_answer_norm and raw_answer_norm in raw_metin_norm:
         return 2, evidence or answer, "Metinde doğrudan geçti"
 
-    # 2) Token bazlı eşleşme
-    metin_tokens = set(_tokenize_story_text(metin))
+    if smart_answer_norm and smart_answer_norm in smart_metin_norm:
+        return 2, evidence or answer, "Eşdeğer anlamla metinde geçti"
+
+    metin_tokens = set(smart_metin_norm.split())
     overlap = ans_tokens & metin_tokens
     coverage = len(overlap) / max(len(ans_tokens), 1)
 
-    # Tek kelimelik güçlü cevap
     if len(ans_tokens) == 1 and len(overlap) == 1:
-        return 2, evidence or answer, "Tek kelimelik doğrudan eşleşme"
+        return 2, evidence or answer, "Tek kelimelik güçlü eşleşme"
+
+    if field_name in {"problem", "olaylar", "cozum"}:
+        if coverage >= 0.60:
+            return 2, evidence or answer, "Anlamsal güçlü eşleşme"
+        elif coverage >= 0.30:
+            return 1, evidence or answer, "Anlamsal kısmi eşleşme"
+        else:
+            return 0, "", "Eşleşme zayıf"
 
     if coverage >= 0.80:
         return 2, evidence or answer, "Güçlü kelime eşleşmesi"
@@ -700,32 +735,41 @@ def _llm_semantic_score(field_name: str, answer: str, metin: str):
     metin_short = (metin or "")[:5000]
 
     sys = f"""
-Sen ilkokul/ortaokul düzeyinde öykü haritası puanlayan dikkatli bir öğretmensin.
+Sen ilkokul/ortaokul düzeyinde öykü haritası puanlayan çok dikkatli bir öğretmensin.
 
 Alan: {field_name}
 
 Görevin:
-Öğrenci cevabının metin tarafından ANLAMSAL olarak desteklenip desteklenmediğini değerlendir.
+Öğrenci cevabının metin tarafından anlamsal olarak desteklenip desteklenmediğini değerlendir.
 
+PUANLAMA:
 0 puan:
 - Cevap metinle uyuşmuyor
 - Metinde destek yok
-- Çok alakasız / yanlış
+- Yanlış, alakasız veya uydurma
 
 1 puan:
 - Cevap kısmen doğru
 - Eksik, çok genel veya belirsiz
-- Metinle zayıf/orta düzey uyumlu
+- Ana fikre yaklaşıyor ama tam değil
 
 2 puan:
 - Cevap metindeki bilgiyle açıkça uyumlu
 - Öğrenci farklı kelimeler kullansa bile anlam doğru
+- Eş anlamlı / sadeleştirilmiş / günlük dilde yazılmış cevaplar kabul edilir
+
+ÇOK ÖNEMLİ:
+- Kelime kelime aynı olmasına gerek yok.
+- “yuva” ve “ev” bağlam içinde aynı şeyi karşılıyorsa doğru kabul et.
+- “yıkıldı”, “bozuldu”, “zarar gördü” gibi ifadeler aynı olaya işaret ediyorsa uygun puan ver.
+- Ama metinde olmayan yeni bir olay, kişi ya da neden eklenmişse puanı düşür.
+- Özellikle problem, olaylar ve çözüm alanlarında yüzeysel kelime farkına takılma; anlamı değerlendir.
 
 Kurallar:
 - Sadece JSON üret.
-- evidence alanı metinden kısa bir ifade olsun.
-- evidence birebir metinden alınmış kısa bir bölüm olsun.
+- evidence alanına metinden kısa, birebir bir kanıt parçası yaz.
 - reason çok kısa olsun.
+- score sadece 0, 1 veya 2 olsun.
 
 JSON şeması:
 {{
@@ -762,48 +806,35 @@ JSON şeması:
 def ai_score_story_map(metin: str, sm: dict):
     alanlar = ["kahraman", "mekan", "zaman", "problem", "olaylar", "cozum"]
 
-    # Net alanlar: önce kural güçlü çalışsın
     kural_agirlikli = {"kahraman", "mekan", "zaman"}
-
-    # Yoruma açık alanlar: gerektiğinde LLM devreye girsin
-    hibrit_alanlar = {"problem", "olaylar", "cozum"}
 
     out = {}
     reasons = {}
+    evidences = {}
 
     for key in alanlar:
         answer = sm.get(key, "")
 
-        rule_score, rule_ev, rule_reason = _score_single_story_field_rule(answer, metin)
+        rule_score, rule_ev, rule_reason = _score_single_story_field_rule(answer, metin, key)
 
         if key in kural_agirlikli:
             out[key] = int(rule_score)
             reasons[key] = rule_reason
+            evidences[key] = rule_ev
             continue
 
-        # Hibrit alanlar
         if not str(answer or "").strip():
             out[key] = 0
             reasons[key] = "Boş cevap"
+            evidences[key] = ""
             continue
 
-        # Kural zaten güçlü ise direkt kullan
-        if rule_score == 2:
-            out[key] = 2
-            reasons[key] = "Kural tabanlı güçlü eşleşme"
-            continue
-
-        # Belirsiz veya zayıfsa LLM anlamsal karar versin
         llm_score, llm_ev, llm_reason = _llm_semantic_score(key, answer, metin)
-
-        # Güvenlik mantığı:
-        # - LLM 2 dediyse 2
-        # - LLM 1 dediyse 1
-        # - LLM 0 dediyse ama kural 1 ise 1'i koru
         final_score = max(rule_score, llm_score)
 
         out[key] = int(final_score)
         reasons[key] = llm_reason or rule_reason or "Değerlendirildi"
+        evidences[key] = llm_ev or rule_ev or ""
 
     total = sum(out.values())
 
