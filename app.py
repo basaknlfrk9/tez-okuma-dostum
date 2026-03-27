@@ -11,7 +11,7 @@ from io import BytesIO
 import pandas as pd
 
 # =========================================================
-# OKUMA DOSTUM — BANKA + SÜREÇ LOG (SINIF KALDIRILDI)
+# OKUMA DOSTUM — BANKA + SÜREÇ LOG
 # =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
@@ -168,6 +168,17 @@ st.markdown("""
     border-radius: 16px;
   }
 
+  .badge-chip {
+    display:inline-block;
+    padding:8px 12px;
+    border-radius:999px;
+    background:linear-gradient(90deg,#ffd86f 0%, #fc6262 100%);
+    color:white;
+    font-weight:700;
+    margin:4px 6px 4px 0;
+    font-size:15px;
+  }
+
   div[data-testid="stTextInput"] input,
   div[data-testid="stTextArea"] textarea {
     border-radius: 16px !important;
@@ -233,7 +244,74 @@ def get_audio(text: str):
         return None
 
 # =========================================================
-# METİN BÖLME (OKUMA EKRANI İÇİN)
+# MOTIVATION + TEMPLATE + BADGES
+# =========================================================
+def get_motivation_message(phase: str, progress: float = 0.0) -> str:
+    if phase == "pre":
+        msgs = [
+            "🌟 Harika, başlamaya hazırsın!",
+            "🧠 Önce biraz düşünelim, sonra okumaya geçeceğiz.",
+            "👏 Güzel gidiyorsun, şimdi metne hazırlanıyoruz."
+        ]
+    elif phase == "during":
+        if progress < 0.34:
+            msgs = [
+                "📖 Harika başladın, böyle devam et!",
+                "👀 Dikkatini çok güzel topluyorsun.",
+                "🌈 İlk bölümleri başarıyla okuyorsun."
+            ]
+        elif progress < 0.67:
+            msgs = [
+                "💪 Çok iyi gidiyorsun, yarısına geldin!",
+                "🔍 İstersen tekrar okuyabilir ya da dinleyebilirsin.",
+                "⭐ Şimdiye kadar çok güzel ilerledin."
+            ]
+        else:
+            msgs = [
+                "🚀 Az kaldı, son bölümlere geldin!",
+                "🌟 Biraz daha dikkat, bitirmek üzeresin.",
+                "👏 Harika sabrettin, neredeyse tamam!"
+            ]
+    elif phase == "post":
+        msgs = [
+            "🧠 Şimdi düşündüklerini toplama zamanı.",
+            "✍️ Kendi cümlelerinle anlatman çok değerli.",
+            "🌟 Şimdi metni hatırlayıp anlatabilirsin."
+        ]
+    elif phase == "questions":
+        msgs = [
+            "⭐ Sorulara geçtin, harika!",
+            "💪 Elinden geleni yap, istersen ipucu alabilirsin.",
+            "🎯 Soruları çözerken metne geri bakabilirsin."
+        ]
+    else:
+        msgs = ["🌟 Güzel gidiyorsun!"]
+    return random.choice(msgs)
+
+def get_storymap_templates():
+    return {
+        "kahraman": "Bu öyküde ... vardı.",
+        "mekan": "Olay ... yerinde geçti.",
+        "zaman": "Olay ... zamanında oldu.",
+        "problem": "Sorun şuydu: ...",
+        "olaylar": "Önce ... oldu. Sonra ... oldu. En son ... oldu.",
+        "cozum": "Sonunda ... oldu."
+    }
+
+def award_badge(name: str):
+    badges = st.session_state.get("badges", [])
+    if name not in badges:
+        badges.append(name)
+    st.session_state.badges = badges
+
+def render_badges():
+    badges = st.session_state.get("badges", [])
+    if badges:
+        html = "".join([f"<span class='badge-chip'>{b}</span>" for b in badges])
+        st.markdown(f"<div>{html}</div>", unsafe_allow_html=True)
+
+# =========================================================
+# METİN BÖLME
 # =========================================================
 def _split_sentences_tr(s: str):
     s = re.sub(r"\s+", " ", (s or "").strip())
@@ -301,7 +379,7 @@ def _force_split_long_text(text: str, max_len: int):
         out.append(buf)
     return out
 
-def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
+def split_paragraphs(text: str, target_min=500, target_max=800, tail_min=180):
     text = (text or "").replace("\r", "\n").strip()
     if not text:
         return []
@@ -354,7 +432,7 @@ def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
                 if len(block) < target_min:
                     pieces = _force_split_long_text(
                         s,
-                        max_len=max(250, target_max - len(block) - 1)
+                        max_len=max(200, target_max - len(block) - 1)
                     )
                     for piece in pieces:
                         cand2 = (block + " " + piece).strip()
@@ -380,7 +458,7 @@ def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
         if not buf:
             buf = b
         else:
-            if len(buf) < target_min and (len(buf) + 1 + len(b)) <= (target_max + 700):
+            if len(buf) < target_min and (len(buf) + 1 + len(b)) <= (target_max + 300):
                 buf = (buf + " " + b).strip()
             else:
                 final.append(buf)
@@ -389,7 +467,7 @@ def split_paragraphs(text: str, target_min=900, target_max=1400, tail_min=350):
         final.append(buf)
 
     if len(final) >= 2 and len(final[-1]) < tail_min:
-        if len(final[-2]) + 1 + len(final[-1]) <= (target_max + 900):
+        if len(final[-2]) + 1 + len(final[-1]) <= (target_max + 350):
             final[-2] = (final[-2] + " " + final[-1]).strip()
             final.pop()
 
@@ -437,31 +515,77 @@ def openai_text_request(system_prompt, user_text, model="gpt-4o-mini", max_retri
     st.error("❌ OpenAI yoğunluğu çok fazla. Biraz sonra tekrar deneyin.")
     st.stop()
 
+def transcribe_audio_bytes(audio_bytes: bytes) -> str:
+    if not audio_bytes:
+        return ""
+    try:
+        bio = BytesIO(audio_bytes)
+        bio.name = "speech.wav"
+        resp = client.audio.transcriptions.create(
+            model="gpt-4o-mini-transcribe",
+            file=bio
+        )
+        text = getattr(resp, "text", "") or ""
+        return text.strip()
+    except Exception:
+        try:
+            bio = BytesIO(audio_bytes)
+            bio.name = "speech.wav"
+            resp = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=bio
+            )
+            text = getattr(resp, "text", "") or ""
+            return text.strip()
+        except Exception:
+            return ""
+
 # =========================================================
 # CHATBOT FONKSİYONLARI
 # =========================================================
-def generate_ai_hint(metin: str, soru: dict, wrong_choice: str):
+def generate_ai_hint(metin: str, soru: dict, wrong_choice: str, level: int = 1):
     opts_payload = {}
     for k in ["A", "B", "C", "D"]:
         if soru.get(k):
             opts_payload[k] = soru.get(k)
 
-    sys = """
+    if level == 1:
+        level_instruction = """
+- Çok genel bir ipucu ver.
+- Cevabı söyleme.
+- Öğrenciyi sadece doğru bölüme yönlendir.
+"""
+    elif level == 2:
+        level_instruction = """
+- Biraz daha açık ipucu ver.
+- Hâlâ doğru cevabı söyleme.
+- Sorunun neye dikkat ettiğini sezdir.
+"""
+    else:
+        level_instruction = """
+- En açık ipucunu ver ama doğru seçeneği doğrudan söyleme.
+- Öğrenciyi doğru cevaba çok yaklaştır.
+"""
+
+    sys = f"""
 Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan sabırlı bir okuma koçusun.
 Görevin cevabı doğrudan söylemeden kısa, anlaşılır ve yönlendirici bir ipucu vermek.
+
 Kurallar:
 - Türkçe yaz.
 - En fazla 2 cümle yaz.
 - Doğru seçeneği ASLA söyleme.
 - Öğrenciyi metindeki ilgili bölüme yönlendir.
 - Yaş düzeyine uygun ve motive edici ol.
+{level_instruction}
 """
     payload = {
         "metin": (metin or "")[:2500],
         "soru": soru.get("kok", ""),
         "seçenekler": opts_payload,
         "ogrencinin_secimi": wrong_choice,
-        "dogru_cevap": soru.get("dogru", "")
+        "dogru_cevap": soru.get("dogru", ""),
+        "ipucu_seviyesi": level
     }
     resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.2)
     return resp.choices[0].message.content.strip()
@@ -495,7 +619,6 @@ Kurallar:
 - İkinci cümlede sadece 1 geliştirme önerisi ver.
 - Cevabı doğrudan verme.
 - Nazik, motive edici ve kısa ol.
-- Özel öğrenme güçlüğü yaşayan bir öğrenciyle konuşuyormuş gibi açık yaz.
 """
     payload = {
         "metin": (metin or "")[:2500],
@@ -518,7 +641,6 @@ Kurallar:
 - Cevabı hemen vermek yerine öğrenciyi düşündür.
 - Öğrenciyi metindeki ipuçlarına yönlendir.
 - Metin dışına taşma.
-- Uygun olduğunda 'metinde hangi ifade bunu düşündürdü?' gibi yönlendirmeler yap.
 """
         }
     ]
@@ -536,6 +658,22 @@ Kurallar:
         messages=messages,
         temperature=0.3,
     )
+    return resp.choices[0].message.content.strip()
+
+def explain_word_simple(word: str, metin: str):
+    sys = """
+Sen çocuklara kelimeyi çok basit anlatan bir öğretmensin.
+Kurallar:
+- Türkçe yaz.
+- En fazla 2 kısa cümle olsun.
+- Kelimenin anlamını çok basit açıkla.
+- Gerekirse metindeki kullanıma göre açıkla.
+"""
+    payload = {
+        "kelime": word,
+        "metin": (metin or "")[:1200]
+    }
+    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.2)
     return resp.choices[0].message.content.strip()
 
 # =========================================================
@@ -601,7 +739,7 @@ def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
     append_row_safe("OkumaSüreci", row)
 
 # =========================================================
-# ÜSTBİLİŞSEL RUBRİK (KURAL TABANLI)
+# ÜSTBİLİŞSEL RUBRİK
 # =========================================================
 def compute_metacog_signals():
     qa = st.session_state.get("question_attempts", {}) or {}
@@ -751,7 +889,7 @@ def load_activity_from_bank(metin_id: str):
     return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
 
 # =========================================================
-# STORY MAP AI (DAHA GÜÇLÜ HİBRİT: EŞDEĞER ANLAM + LLM)
+# STORY MAP AI
 # =========================================================
 def _tr_lower_story(s: str) -> str:
     s = str(s or "")
@@ -766,10 +904,6 @@ def _normalize_story_text(s: str) -> str:
     s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
     s = re.sub(r"\s+", " ", s).strip()
     return s
-
-def _tokenize_story_text(s: str):
-    s = _normalize_story_text(s)
-    return [t for t in s.split() if len(t) >= 2]
 
 def _story_replace_synonyms(s: str) -> str:
     s = " " + _normalize_story_text(s) + " "
@@ -887,10 +1021,6 @@ Sen ilkokul/ortaokul düzeyinde öykü haritası puanlayan çok dikkatli bir ö�
 
 Alan: {field_name}
 
-Görevin:
-Öğrenci cevabının metin tarafından anlamsal olarak desteklenip desteklenmediğini değerlendir.
-
-PUANLAMA:
 0 puan:
 - Cevap metinle uyuşmuyor
 - Metinde destek yok
@@ -899,24 +1029,15 @@ PUANLAMA:
 1 puan:
 - Cevap kısmen doğru
 - Eksik, çok genel veya belirsiz
-- Ana fikre yaklaşıyor ama tam değil
 
 2 puan:
 - Cevap metindeki bilgiyle açıkça uyumlu
-- Öğrenci farklı kelimeler kullansa bile anlam doğru
-- Eş anlamlı / sadeleştirilmiş / günlük dilde yazılmış cevaplar kabul edilir
-
-ÇOK ÖNEMLİ:
-- Kelime kelime aynı olmasına gerek yok.
-- “yuva” ve “ev” bağlam içinde aynı şeyi karşılıyorsa doğru kabul et.
-- “yıkıldı”, “bozuldu”, “zarar gördü” gibi ifadeler aynı olaya işaret ediyorsa uygun puan ver.
-- Ama metinde olmayan yeni bir olay, kişi ya da neden eklenmişse puanı düşür.
-- Özellikle problem, olaylar ve çözüm alanlarında yüzeysel kelime farkına takılma; anlamı değerlendir.
+- Eş anlamlı / sadeleştirilmiş cevaplar kabul edilir
 
 Kurallar:
 - Sadece JSON üret.
-- evidence alanına metinden kısa, birebir bir kanıt parçası yaz.
-- reason çok kısa olsun.
+- evidence alanına metinden kısa bir kanıt yaz.
+- reason kısa olsun.
 - score sadece 0, 1 veya 2 olsun.
 
 JSON şeması:
@@ -926,7 +1047,6 @@ JSON şeması:
   "reason": ""
 }}
 """
-
     user = json.dumps({
         "alan": field_name,
         "ogrenci_cevabi": answer,
@@ -939,42 +1059,32 @@ JSON şeması:
         data = json.loads(raw)
 
         score = int(data.get("score", 0))
-        if score < 0:
-            score = 0
-        if score > 2:
-            score = 2
-
+        score = max(0, min(2, score))
         evidence = str(data.get("evidence", "") or "").strip()[:180]
         reason = str(data.get("reason", "") or "").strip()[:160]
-
         return score, evidence, reason
     except Exception:
         return 0, "", "LLM puanı alınamadı"
 
 def ai_score_story_map(metin: str, sm: dict):
     alanlar = ["kahraman", "mekan", "zaman", "problem", "olaylar", "cozum"]
-
     kural_agirlikli = {"kahraman", "mekan", "zaman"}
 
     out = {}
     reasons = {}
-    evidences = {}
 
     for key in alanlar:
         answer = sm.get(key, "")
-
         rule_score, rule_ev, rule_reason = _score_single_story_field_rule(answer, metin, key)
 
         if key in kural_agirlikli:
             out[key] = int(rule_score)
             reasons[key] = rule_reason
-            evidences[key] = rule_ev
             continue
 
         if not str(answer or "").strip():
             out[key] = 0
             reasons[key] = "Boş cevap"
-            evidences[key] = ""
             continue
 
         llm_score, llm_ev, llm_reason = _llm_semantic_score(key, answer, metin)
@@ -982,7 +1092,6 @@ def ai_score_story_map(metin: str, sm: dict):
 
         out[key] = int(final_score)
         reasons[key] = llm_reason or rule_reason or "Değerlendirildi"
-        evidences[key] = llm_ev or rule_ev or ""
 
     total = sum(out.values())
 
@@ -1000,7 +1109,6 @@ def ai_score_story_map(metin: str, sm: dict):
 
     reason = " | ".join(parts) if parts else "Tamamlandı"
     reason = reason[:220]
-
     return out, total, reason
 
 def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
@@ -1027,6 +1135,27 @@ def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
         reason,
     ]
     return append_row_safe("OykuHaritasi", row)
+
+# =========================================================
+# WORD HELPERS
+# =========================================================
+def extract_candidate_words(text: str, min_len: int = 6, max_count: int = 20):
+    tokens = re.findall(r"[A-Za-zÇĞİÖŞÜçğıöşü]+", text or "")
+    cleaned = []
+    stop = {
+        "çünkü","ancak","sonunda","olarak","içinde","olduğu","olarak","sonra","önce",
+        "birlikte","küçük","büyük","onların","olunca","metinde","sorular","kahraman",
+        "mekan","zaman","problem","olaylar","çözüm","cozum"
+    }
+    for t in tokens:
+        tl = t.lower()
+        if len(tl) >= min_len and tl not in stop:
+            cleaned.append(t)
+    uniq = []
+    for w in cleaned:
+        if w.lower() not in [u.lower() for u in uniq]:
+            uniq.append(w)
+    return uniq[:max_count]
 
 # =========================================================
 # SESSION STATE INIT
@@ -1058,6 +1187,7 @@ def reset_activity_states():
 
     st.session_state.skipped = []
     st.session_state.hints_used_by_q = {}
+    st.session_state.hint_level_by_q = {}
     st.session_state.correct_no_hint = 0
     st.session_state.correct_with_hint = 0
     st.session_state.question_attempts = {}
@@ -1072,13 +1202,16 @@ def reset_activity_states():
     st.session_state.summary_feedback = ""
     st.session_state.storymap_feedback = ""
     st.session_state.chat_messages = []
+    st.session_state.badges = []
+    st.session_state.last_word_help = ""
+    st.session_state.word_help_answer = ""
+    st.session_state.voice_text = ""
 
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
 if "busy" not in st.session_state:
     st.session_state.busy = False
 
-# Global çıkış
 if st.session_state.phase != "auth":
     col_a, col_b = st.columns([9, 1])
     with col_b:
@@ -1140,9 +1273,13 @@ elif st.session_state.phase == "setup":
             st.stop()
 
         st.session_state.activity = activity
-        st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
+        st.session_state.paragraphs = split_paragraphs(
+            activity.get("sade_metin", ""),
+            target_min=500,
+            target_max=800,
+            tail_min=180
+        )
         st.session_state.p_idx = 0
-
         st.session_state.q_idx = 0
         st.session_state.correct_map = {}
         st.session_state.hints = 0
@@ -1167,6 +1304,7 @@ elif st.session_state.phase == "pre":
     </div>
     """, unsafe_allow_html=True)
     st.markdown("<div class='section-soft-blue'><b>Hazırlık Zamanı</b><br/>Önce metin hakkında biraz düşünelim.</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='mini-success'>{get_motivation_message('pre')}</div>", unsafe_allow_html=True)
 
     baslik = st.session_state.activity.get("baslik", "")
     pre_ipucu = st.session_state.activity.get("pre_ipucu", "")
@@ -1192,6 +1330,7 @@ elif st.session_state.phase == "pre":
 
         if st.session_state.prediction:
             save_reading_process("PRE_PREDICTION", st.session_state.prediction, paragraf_no=None)
+            award_badge("🔮 Tahmin Yaptım")
         save_reading_process("PRE_ATTENTION", "Evet" if attention else "Hayır", paragraf_no=None)
         save_reading_process("PRE_SPEED", speed, paragraf_no=None)
 
@@ -1214,11 +1353,25 @@ elif st.session_state.phase == "during":
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
     metin_hash = hash(metin)
     if st.session_state.get("metin_hash") != metin_hash:
-        st.session_state.paragraphs = split_paragraphs(metin, target_min=900, target_max=1400)
+        st.session_state.paragraphs = split_paragraphs(
+            metin,
+            target_min=500,
+            target_max=800,
+            tail_min=180
+        )
         st.session_state.metin_hash = metin_hash
 
     paras = st.session_state.get("paragraphs", []) or []
     p_idx = st.session_state.get("p_idx", 0)
+    total_paras = max(len(paras), 1)
+    progress_ratio = p_idx / total_paras if total_paras else 0
+
+    st.markdown(
+        f"<div class='mini-success'>{get_motivation_message('during', progress_ratio)}</div>",
+        unsafe_allow_html=True
+    )
+
+    render_badges()
 
     if p_idx < len(paras):
         c1, c2 = st.columns([2, 5])
@@ -1230,6 +1383,7 @@ elif st.session_state.phase == "during":
                 fp = get_audio(paras[p_idx])
                 if fp:
                     st.audio(fp, format="audio/mp3")
+                    award_badge("🎧 Dinledim")
 
         with c2:
             st.markdown(
@@ -1242,6 +1396,23 @@ elif st.session_state.phase == "during":
         st.divider()
         st.markdown(f"<div class='highlight-box'>{paras[p_idx]}</div>", unsafe_allow_html=True)
 
+        # Kelime desteği
+        st.markdown("<div class='card'><b>🧩 Zor kelimeye yardım</b><br/>İstersen bölümden bir kelime seçip anlamını öğrenebilirsin.</div>", unsafe_allow_html=True)
+        candidate_words = extract_candidate_words(paras[p_idx], min_len=6, max_count=12)
+        if candidate_words:
+            selected_word = st.selectbox("Kelime seç:", [""] + candidate_words, key=f"word_help_select_{p_idx}")
+            if st.button("Kelimeyi Açıkla", key=f"word_help_btn_{p_idx}") and selected_word:
+                try:
+                    ans = explain_word_simple(selected_word, paras[p_idx])
+                    st.session_state.last_word_help = selected_word
+                    st.session_state.word_help_answer = ans
+                    save_reading_process("WORD_HELP", f"{selected_word} | {ans}", paragraf_no=p_idx + 1)
+                    award_badge("📘 Kelime Kâşifi")
+                except Exception:
+                    st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
+        if st.session_state.get("word_help_answer"):
+            st.info(f"🧠 {st.session_state.get('last_word_help','Kelime')}: {st.session_state.word_help_answer}")
+
         coln1, coln2 = st.columns(2)
         with coln1:
             if st.button("🔁 Bu bölümü tekrar oku", key=f"repeat_p_{p_idx}"):
@@ -1249,8 +1420,11 @@ elif st.session_state.phase == "during":
                 st.session_state.reread_count += 1
                 save_reading_process("REPEAT_READ", "Bölüm tekrar okundu", paragraf_no=p_idx + 1)
                 st.info("Tekrar okudun. Hazır olunca devam edebilirsin.")
+                award_badge("🔁 Tekrar Okudum")
         with coln2:
             if st.button("➡️ Sonraki bölüm", key=f"next_p_{p_idx}"):
+                if (p_idx + 1) >= len(paras):
+                    award_badge("📖 Metni Bitirdim")
                 st.session_state.p_idx = p_idx + 1
                 st.rerun()
     else:
@@ -1265,6 +1439,7 @@ elif st.session_state.phase == "during":
                     st.session_state.final_important_saved = True
                     save_reading_process("IMPORTANT_NOTE_FINAL", st.session_state.final_important_note.strip(), paragraf_no=None)
                     st.success("Kaydedildi!")
+                    award_badge("📌 Önemli Nokta Bulucu")
                 else:
                     st.info("Zaten kaydedildi.")
             else:
@@ -1292,10 +1467,30 @@ elif st.session_state.phase == "post":
     </div>
     """, unsafe_allow_html=True)
     st.markdown("<div class='section-soft-orange'><b>Toparlama Zamanı</b><br/>Şimdi metni hatırlayıp kendi cümlelerinle anlat.</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='mini-success'>{get_motivation_message('post')}</div>", unsafe_allow_html=True)
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
+    render_badges()
 
     st.markdown("<div class='card'><b>Özetleme</b><br/>Metni 2–3 cümleyle anlat.</div>", unsafe_allow_html=True)
+
+    voice_audio = st.audio_input("🎤 İstersen sesli anlat, ben yazıya çevireyim:", key="summary_audio")
+    if voice_audio is not None:
+        st.audio(voice_audio)
+        if st.button("🎙️ Sesimi Yazıya Çevir", key="transcribe_summary_btn"):
+            text = transcribe_audio_bytes(voice_audio.getvalue())
+            if text:
+                st.session_state.summary = text
+                st.session_state.voice_text = text
+                save_reading_process("VOICE_TO_TEXT", text, paragraf_no=None)
+                award_badge("🎤 Sesli Yanıt")
+                st.success("Sesin yazıya çevrildi.")
+            else:
+                st.warning("Ses şu anda yazıya çevrilemedi.")
+
+    if st.session_state.get("voice_text"):
+        st.info(f"📝 Sesli yanıt metni: {st.session_state.voice_text}")
+
     summ = st.text_area("Özetin:", value=st.session_state.summary, height=120)
 
     if st.button("Özeti Kaydet ✅"):
@@ -1306,6 +1501,7 @@ elif st.session_state.phase == "post":
                 fb = generate_summary_feedback(metin, st.session_state.summary)
                 st.session_state.summary_feedback = fb
                 save_reading_process("AI_SUMMARY_FEEDBACK", fb, paragraf_no=None)
+                award_badge("📝 Özet Ustası")
             except Exception:
                 st.session_state.summary_feedback = ""
         st.success("✅ Özet kaydedildi!")
@@ -1328,6 +1524,7 @@ elif st.session_state.phase == "post":
         save_reading_process("POST_REFLECTION_STRATEGY", st.session_state.reflection_strategy or "(boş)", paragraf_no=None)
         save_reading_process("POST_REFLECTION_NEXT", st.session_state.reflection_next_time or "(boş)", paragraf_no=None)
         st.success("✅ Kaydedildi!")
+        award_badge("🧠 Düşünen Okuyucu")
 
     st.divider()
     st.subheader("🗺️ Öykü Haritası (Story Map)")
@@ -1336,16 +1533,19 @@ elif st.session_state.phase == "post":
     Metindeki öykünün parçalarını tek tek yaz. Kısa yazman yeterli (1–2 cümle).</div>
     """, unsafe_allow_html=True)
 
+    templates = get_storymap_templates()
+    st.markdown("<div class='small-note'>Zorlanırsan aşağıdaki başlangıç cümlelerini kullanabilirsin.</div>", unsafe_allow_html=True)
+
     sm = st.session_state.story_map
     col1, col2 = st.columns(2)
     with col1:
-        sm["kahraman"] = st.text_input("👤 Kahraman(lar)", value=sm["kahraman"])
-        sm["mekan"] = st.text_input("🏠 Mekân", value=sm["mekan"])
-        sm["zaman"] = st.text_input("🕒 Zaman", value=sm["zaman"])
+        sm["kahraman"] = st.text_input("👤 Kahraman", value=sm["kahraman"], placeholder=templates["kahraman"])
+        sm["mekan"] = st.text_input("🏠 Mekân", value=sm["mekan"], placeholder=templates["mekan"])
+        sm["zaman"] = st.text_input("🕒 Zaman", value=sm["zaman"], placeholder=templates["zaman"])
     with col2:
-        sm["problem"] = st.text_input("⚠️ Problem (Sorun)", value=sm["problem"])
-        sm["olaylar"] = st.text_area("🔁 Olaylar (Kısaca sırayla)", value=sm["olaylar"], height=90)
-        sm["cozum"] = st.text_input("✅ Çözüm / Sonuç", value=sm["cozum"])
+        sm["problem"] = st.text_input("⚠️ Problem", value=sm["problem"], placeholder=templates["problem"])
+        sm["olaylar"] = st.text_area("🔁 Olaylar", value=sm["olaylar"], height=110, placeholder=templates["olaylar"])
+        sm["cozum"] = st.text_input("✅ Çözüm", value=sm["cozum"], placeholder=templates["cozum"])
 
     st.session_state.story_map = sm
 
@@ -1375,6 +1575,7 @@ elif st.session_state.phase == "post":
 
                     st.success(f"✅ Kaydedildi! AI Puan: {total}/12")
                     st.caption(f"Gerekçe: {reason}")
+                    award_badge("🗺️ Öykü Haritası Tamamlandı")
 
     with col_b:
         st.markdown(
@@ -1413,6 +1614,7 @@ elif st.session_state.phase == "post":
             st.session_state.chat_messages.append({"role": "assistant", "content": reply})
             save_reading_process("CHAT_USER", user_msg.strip(), paragraf_no=None)
             save_reading_process("CHATBOT_REPLY", reply, paragraf_no=None)
+            award_badge("💬 Chatbotla Konuştum")
             st.rerun()
         except Exception:
             st.warning("Şu anda chatbot yanıtı üretilemedi.")
@@ -1445,6 +1647,8 @@ elif st.session_state.phase == "questions":
         <div class='mini-progress-fill' style='width: 95%;'></div>
     </div>
     """, unsafe_allow_html=True)
+    st.markdown(f"<div class='mini-success'>{get_motivation_message('questions')}</div>", unsafe_allow_html=True)
+    render_badges()
 
     colt1, colt2 = st.columns([3, 1])
     with colt1:
@@ -1461,8 +1665,13 @@ elif st.session_state.phase == "questions":
 
     if i < total_q:
         q = sorular[i]
-        st.markdown("<div class='mini-success'>💪 Harika gidiyorsun, biraz daha kaldı!</div>", unsafe_allow_html=True)
+        current_hint_level = st.session_state.hint_level_by_q.get(i, 0)
+
         st.subheader(f"Soru {i+1} / {total_q}")
+        st.markdown(
+            f"<div class='small-note'>İpucu seviyesi: <b>{current_hint_level}</b>/3</div>",
+            unsafe_allow_html=True
+        )
         st.markdown(f"<div style='font-size:22px; margin-bottom:14px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
 
         for opt in opts:
@@ -1480,14 +1689,26 @@ elif st.session_state.phase == "questions":
                 if is_correct:
                     st.success("🌟 Doğru!")
                     st.session_state.ai_hint_text = ""
+                    if current_hint_level == 0:
+                        award_badge("🏅 İpucusuz Doğru")
+                    else:
+                        award_badge("💡 İpucuyla Başardım")
                     st.session_state.q_idx = i + 1
                     st.rerun()
                 else:
                     st.error("Tekrar dene!")
                     try:
-                        ai_hint = generate_ai_hint(metin, q, opt)
-                        st.session_state.ai_hint_text = ai_hint
-                        save_reading_process("AI_HINT_AUTO", f"Soru {i+1} | {ai_hint}", paragraf_no=None)
+                        next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
+                        st.session_state.hint_level_by_q[i] = next_level
+
+                        ai_hint = generate_ai_hint(metin, q, opt, level=next_level)
+                        st.session_state.ai_hint_text = f"(İpucu {next_level}) {ai_hint}"
+
+                        save_reading_process(
+                            "AI_HINT_AUTO",
+                            f"Soru {i+1} | seviye={next_level} | {ai_hint}",
+                            paragraf_no=None
+                        )
                     except Exception:
                         st.session_state.ai_hint_text = "Metinde bu soruyla ilgili bölümü tekrar incele."
 
@@ -1497,13 +1718,26 @@ elif st.session_state.phase == "questions":
         if st.button("💡 İpucu Al", key=f"hint_{i}"):
             st.session_state.hints += 1
             st.session_state.show_text_in_questions = True
-            save_reading_process("HINT", f"Soru {i+1} | ipucu_alindi", paragraf_no=None)
+
+            next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
+            st.session_state.hint_level_by_q[i] = next_level
+
+            save_reading_process(
+                "HINT",
+                f"Soru {i+1} | ipucu_alindi | seviye={next_level}",
+                paragraf_no=None
+            )
 
             try:
-                ai_hint = generate_ai_hint(metin, q, "İpucu istendi")
-                st.session_state.ai_hint_text = ai_hint
-                save_reading_process("AI_HINT_MANUAL", f"Soru {i+1} | {ai_hint}", paragraf_no=None)
-                st.info(f"🤖 Chatbot ipucu: {ai_hint}")
+                ai_hint = generate_ai_hint(metin, q, "İpucu istendi", level=next_level)
+                st.session_state.ai_hint_text = f"(İpucu {next_level}) {ai_hint}"
+                save_reading_process(
+                    "AI_HINT_MANUAL",
+                    f"Soru {i+1} | seviye={next_level} | {ai_hint}",
+                    paragraf_no=None
+                )
+                st.info(f"🤖 Chatbot ipucu: (İpucu {next_level}) {ai_hint}")
+                award_badge("💡 İpucu Kullandım")
             except Exception:
                 st.info("📌 Metni açtım. Anahtar kelimeleri metinde ara ve ilgili bölümü tekrar oku.")
 
@@ -1553,6 +1787,11 @@ elif st.session_state.phase == "questions":
 
             ok = append_row_safe("Performans", row)
             if ok:
+                if dogru == total_q and total_q > 0:
+                    award_badge("🏆 Tüm Sorular Doğru")
+                if st.session_state.get("hints", 0) == 0:
+                    award_badge("🌟 İpucusuz Tamamlama")
+
                 st.session_state.last_report = {
                     "basari_yuzde": basari_yuzde,
                     "dogru": dogru,
@@ -1597,6 +1836,7 @@ elif st.session_state.phase == "done":
     """, unsafe_allow_html=True)
 
     rep = st.session_state.get("last_report", {}) or {}
+    render_badges()
 
     if rep:
         st.subheader("📊 Bugünkü Skor Özeti")
@@ -1652,12 +1892,12 @@ elif st.session_state.phase == "done":
     st.divider()
     st.subheader("🗺️ Öykü Haritası Sonucun")
     sm = st.session_state.get("story_map", {}) or {}
-    st.markdown(f"<div class='card'><b>👤 Kahraman(lar)</b><br/>{(sm.get('kahraman') or '(boş)')}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>👤 Kahraman</b><br/>{(sm.get('kahraman') or '(boş)')}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='card'><b>🏠 Mekân</b><br/>{(sm.get('mekan') or '(boş)')}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='card'><b>🕒 Zaman</b><br/>{(sm.get('zaman') or '(boş)')}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='card'><b>⚠️ Problem</b><br/>{(sm.get('problem') or '(boş)')}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='card'><b>🔁 Olaylar</b><br/>{(sm.get('olaylar') or '(boş)')}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='card'><b>✅ Çözüm / Sonuç</b><br/>{(sm.get('cozum') or '(boş)')}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='card'><b>✅ Çözüm</b><br/>{(sm.get('cozum') or '(boş)')}</div>", unsafe_allow_html=True)
 
     sm_total = st.session_state.get("story_map_last_total")
     sm_reason = st.session_state.get("story_map_last_reason", "")
