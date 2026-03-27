@@ -18,29 +18,177 @@ st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&display=swap');
-  html, body, [class*="css"] { font-family: 'Lexend', sans-serif; font-size: 20px; }
-  .stButton button {
-    width: 100%; border-radius: 18px; height: 3.0em;
-    font-weight: 600; font-size: 20px !important;
-    border: 2px solid #eee; background-color: #3498db; color: white;
+  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700&display=swap');
+
+  html, body, [class*="css"] {
+    font-family: 'Lexend', sans-serif;
+    font-size: 20px;
+    background: linear-gradient(180deg, #f8fbff 0%, #fffdf7 100%);
   }
+
+  .main {
+    background: linear-gradient(180deg, #f8fbff 0%, #fffdf7 100%);
+  }
+
+  h1, h2, h3 {
+    color: #2c3e50;
+    letter-spacing: 0.2px;
+  }
+
+  .stButton button {
+    width: 100%;
+    border-radius: 18px;
+    height: 3.1em;
+    font-weight: 700;
+    font-size: 19px !important;
+    border: none;
+    background: linear-gradient(90deg, #4facfe 0%, #00c6ff 100%);
+    color: white;
+    box-shadow: 0 6px 14px rgba(79, 172, 254, 0.25);
+    transition: all 0.18s ease-in-out;
+  }
+
+  .stButton button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 18px rgba(79, 172, 254, 0.30);
+    filter: brightness(1.03);
+  }
+
+  .stButton button:active {
+    transform: scale(0.98);
+  }
+
   .highlight-box {
-    background-color: #ffffff; padding: 26px; border-radius: 22px;
-    box-shadow: 0 10px 20px rgba(0,0,0,0.08);
-    border-left: 12px solid #f1c40f; font-size: 22px !important;
-    line-height: 1.9 !important; margin-bottom: 18px;
+    background: linear-gradient(180deg, #ffffff 0%, #fffef9 100%);
+    padding: 28px;
+    border-radius: 24px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+    border-left: 12px solid #ffd54f;
+    font-size: 22px !important;
+    line-height: 1.9 !important;
+    margin-bottom: 18px;
     white-space: pre-wrap;
   }
-  .small-note { color:#666; font-size:16px; }
-  .card { background:#fff; padding:16px; border-radius:18px; border:1px solid #eee; margin-bottom:10px; }
-  .chat-user {
-    background:#eef6ff; padding:12px; border-radius:14px; margin-bottom:8px;
-    border:1px solid #d7e9ff;
+
+  .small-note {
+    color: #5f6b7a;
+    font-size: 16px;
+    background: #f4f8ff;
+    padding: 10px 14px;
+    border-radius: 14px;
+    border: 1px solid #dde9ff;
+    margin-bottom: 8px;
   }
+
+  .card {
+    background: linear-gradient(180deg, #ffffff 0%, #fffdfa 100%);
+    padding: 18px;
+    border-radius: 22px;
+    border: 1px solid #eef2f7;
+    margin-bottom: 12px;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.05);
+  }
+
+  .chat-user {
+    background: linear-gradient(180deg, #eef7ff 0%, #e9f3ff 100%);
+    padding: 14px;
+    border-radius: 16px;
+    margin-bottom: 8px;
+    border: 1px solid #d7e9ff;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+  }
+
   .chat-bot {
-    background:#f7f7f7; padding:12px; border-radius:14px; margin-bottom:8px;
-    border:1px solid #e7e7e7;
+    background: linear-gradient(180deg, #fff8e8 0%, #fffdf6 100%);
+    padding: 14px;
+    border-radius: 16px;
+    margin-bottom: 8px;
+    border: 1px solid #ffe7ad;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+  }
+
+  .fun-badge {
+    display: inline-block;
+    background: linear-gradient(90deg, #ffe082 0%, #ffd54f 100%);
+    color: #5d4037;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 10px rgba(255, 213, 79, 0.25);
+  }
+
+  .section-soft-blue {
+    background: linear-gradient(180deg, #eef7ff 0%, #f8fbff 100%);
+    border: 1px solid #dbeeff;
+    border-radius: 22px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .section-soft-green {
+    background: linear-gradient(180deg, #effcf5 0%, #f9fffb 100%);
+    border: 1px solid #d8f5e3;
+    border-radius: 22px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .section-soft-orange {
+    background: linear-gradient(180deg, #fff6ea 0%, #fffdf9 100%);
+    border: 1px solid #ffe5bf;
+    border-radius: 22px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .mini-success {
+    background: linear-gradient(90deg, #d4fc79 0%, #96e6a1 100%);
+    color: #1f4d2e;
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 16px;
+    font-weight: 600;
+    margin: 8px 0 12px 0;
+  }
+
+  .mini-progress {
+    background: #edf4ff;
+    border-radius: 16px;
+    overflow: hidden;
+    height: 16px;
+    margin: 8px 0 18px 0;
+    border: 1px solid #dbe8ff;
+  }
+
+  .mini-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #43cea2 0%, #185a9d 100%);
+    border-radius: 16px;
+  }
+
+  div[data-testid="stTextInput"] input,
+  div[data-testid="stTextArea"] textarea {
+    border-radius: 16px !important;
+    border: 2px solid #e6eef8 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+  }
+
+  div[data-testid="stTextInput"] input:focus,
+  div[data-testid="stTextArea"] textarea:focus {
+    border: 2px solid #8ec5ff !important;
+    box-shadow: 0 0 0 2px rgba(142, 197, 255, 0.18) !important;
+  }
+
+  div[data-testid="stRadio"] label,
+  div[data-testid="stCheckbox"] label {
+    font-size: 18px !important;
+  }
+
+  .stAlert {
+    border-radius: 18px !important;
   }
 </style>
 """, unsafe_allow_html=True)
@@ -605,7 +753,7 @@ def load_activity_from_bank(metin_id: str):
 # =========================================================
 # STORY MAP AI (DAHA GÜÇLÜ HİBRİT: EŞDEĞER ANLAM + LLM)
 # =========================================================
-def _tr_lower(s: str) -> str:
+def _tr_lower_story(s: str) -> str:
     s = str(s or "")
     repl = str.maketrans({
         "I": "ı", "İ": "i",
@@ -614,7 +762,7 @@ def _tr_lower(s: str) -> str:
     return s.translate(repl).lower()
 
 def _normalize_story_text(s: str) -> str:
-    s = _tr_lower(s)
+    s = _tr_lower_story(s)
     s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
     s = re.sub(r"\s+", " ", s).strip()
     return s
@@ -943,6 +1091,9 @@ if st.session_state.phase != "auth":
 # =========================================================
 if st.session_state.phase == "auth":
     st.title("🌟 Okuma Dostum'a Hoş Geldin!")
+    st.markdown("<div class='fun-badge'>🎉 Bugün birlikte okuyup keşfedeceğiz!</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-soft-blue'><b>Hazır mısın?</b><br/>Önce öğrenci kodunu gir, sonra metnini seç ve başlayalım.</div>", unsafe_allow_html=True)
+
     u = st.text_input("Öğrenci Kodun (örn: S5-014):")
 
     try:
@@ -969,6 +1120,7 @@ if st.session_state.phase == "auth":
 # =========================================================
 elif st.session_state.phase == "setup":
     st.subheader("📄 Metin Hazırla (Sistemden)")
+    st.markdown("<div class='fun-badge'>✨ Metnimizi hazırlıyoruz</div>", unsafe_allow_html=True)
 
     selected_id = st.session_state.get("metin_id", "")
     if not selected_id:
@@ -1008,6 +1160,13 @@ elif st.session_state.phase == "setup":
 # =========================================================
 elif st.session_state.phase == "pre":
     st.subheader("🟦 Okuma Öncesi (PRE-READING)")
+    st.markdown("<div class='fun-badge'>🧩 1. Aşama: Hazırlanıyoruz</div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class='mini-progress'>
+        <div class='mini-progress-fill' style='width: 25%;'></div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("<div class='section-soft-blue'><b>Hazırlık Zamanı</b><br/>Önce metin hakkında biraz düşünelim.</div>", unsafe_allow_html=True)
 
     baslik = st.session_state.activity.get("baslik", "")
     pre_ipucu = st.session_state.activity.get("pre_ipucu", "")
@@ -1044,6 +1203,13 @@ elif st.session_state.phase == "pre":
 # =========================================================
 elif st.session_state.phase == "during":
     st.subheader("🟩 Okuma Sırası (DURING-READING)")
+    st.markdown("<div class='fun-badge'>📖 2. Aşama: Şimdi okuma zamanı</div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class='mini-progress'>
+        <div class='mini-progress-fill' style='width: 50%;'></div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("<div class='section-soft-green'><b>Okuma Zamanı</b><br/>İstersen dinleyebilir, istersen tekrar okuyabilirsin.</div>", unsafe_allow_html=True)
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
     metin_hash = hash(metin)
@@ -1088,6 +1254,8 @@ elif st.session_state.phase == "during":
                 st.session_state.p_idx = p_idx + 1
                 st.rerun()
     else:
+        st.markdown("<div class='mini-success'>🌟 Metni bitirdin! Şimdi önemli kısmı hatırlayalım.</div>", unsafe_allow_html=True)
+
         st.markdown("<div class='card'><b>Metnin En Önemli Şeyi</b><br/>Sence bu metindeki en önemli şey neydi? (1 cümle)</div>", unsafe_allow_html=True)
         st.session_state.final_important_note = st.text_input("En önemli şey:", value=st.session_state.final_important_note)
 
@@ -1117,6 +1285,14 @@ elif st.session_state.phase == "during":
 # =========================================================
 elif st.session_state.phase == "post":
     st.subheader("🟧 Okuma Sonrası (POST-READING)")
+    st.markdown("<div class='fun-badge'>🧠 3. Aşama: Düşünme ve toplama zamanı</div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class='mini-progress'>
+        <div class='mini-progress-fill' style='width: 75%;'></div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("<div class='section-soft-orange'><b>Toparlama Zamanı</b><br/>Şimdi metni hatırlayıp kendi cümlelerinle anlat.</div>", unsafe_allow_html=True)
+
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
 
     st.markdown("<div class='card'><b>Özetleme</b><br/>Metni 2–3 cümleyle anlat.</div>", unsafe_allow_html=True)
@@ -1263,6 +1439,13 @@ elif st.session_state.phase == "questions":
     if "show_text_in_questions" not in st.session_state:
         st.session_state.show_text_in_questions = False
 
+    st.markdown("<div class='fun-badge'>⭐ 4. Aşama: Soruları çözüyoruz</div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class='mini-progress'>
+        <div class='mini-progress-fill' style='width: 95%;'></div>
+    </div>
+    """, unsafe_allow_html=True)
+
     colt1, colt2 = st.columns([3, 1])
     with colt1:
         st.markdown("<div class='small-note'>İstersen sorularda metni buradan açıp okuyabilirsin.</div>", unsafe_allow_html=True)
@@ -1278,6 +1461,7 @@ elif st.session_state.phase == "questions":
 
     if i < total_q:
         q = sorular[i]
+        st.markdown("<div class='mini-success'>💪 Harika gidiyorsun, biraz daha kaldı!</div>", unsafe_allow_html=True)
         st.subheader(f"Soru {i+1} / {total_q}")
         st.markdown(f"<div style='font-size:22px; margin-bottom:14px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
 
@@ -1405,6 +1589,12 @@ elif st.session_state.phase == "questions":
 elif st.session_state.phase == "done":
     st.balloons()
     st.success("✅ Bugünkü çalışman kaydedildi!")
+    st.markdown("<div class='fun-badge'>🏆 Tebrikler! Bugünkü görevi tamamladın</div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class='mini-progress'>
+        <div class='mini-progress-fill' style='width: 100%;'></div>
+    </div>
+    """, unsafe_allow_html=True)
 
     rep = st.session_state.get("last_report", {}) or {}
 
