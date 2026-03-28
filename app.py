@@ -298,17 +298,42 @@ def get_storymap_templates():
         "cozum": "Sonunda ... oldu."
     }
 
+def show_big_badge_popup(text: str):
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, #ffe082 0%, #ffb74d 100%);
+            color: #4e342e;
+            padding: 22px;
+            border-radius: 24px;
+            text-align: center;
+            font-size: 26px;
+            font-weight: 700;
+            margin: 14px 0 18px 0;
+            box-shadow: 0 10px 22px rgba(0,0,0,0.12);
+            border: 3px solid #fff3c4;
+        ">
+            🏅 1 Rozet Kazandın! <br/>
+            <span style="font-size:22px;">{text}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 def award_badge(name: str):
     badges = st.session_state.get("badges", [])
     if name not in badges:
         badges.append(name)
-    st.session_state.badges = badges
+        st.session_state.badges = badges
+        st.session_state.last_new_badge = name
+    else:
+        st.session_state.badges = badges
 
 def render_badges():
     badges = st.session_state.get("badges", [])
     if badges:
         html = "".join([f"<span class='badge-chip'>{b}</span>" for b in badges])
-        st.markdown(f"<div>{html}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div><b>Kazandığın Rozetler</b><br/>{html}</div>", unsafe_allow_html=True)
 
 # =========================================================
 # METİN BÖLME
@@ -1137,27 +1162,6 @@ def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
     return append_row_safe("OykuHaritasi", row)
 
 # =========================================================
-# WORD HELPERS
-# =========================================================
-def extract_candidate_words(text: str, min_len: int = 6, max_count: int = 20):
-    tokens = re.findall(r"[A-Za-zÇĞİÖŞÜçğıöşü]+", text or "")
-    cleaned = []
-    stop = {
-        "çünkü","ancak","sonunda","olarak","içinde","olduğu","olarak","sonra","önce",
-        "birlikte","küçük","büyük","onların","olunca","metinde","sorular","kahraman",
-        "mekan","zaman","problem","olaylar","çözüm","cozum"
-    }
-    for t in tokens:
-        tl = t.lower()
-        if len(tl) >= min_len and tl not in stop:
-            cleaned.append(t)
-    uniq = []
-    for w in cleaned:
-        if w.lower() not in [u.lower() for u in uniq]:
-            uniq.append(w)
-    return uniq[:max_count]
-
-# =========================================================
 # SESSION STATE INIT
 # =========================================================
 def reset_activity_states():
@@ -1206,6 +1210,7 @@ def reset_activity_states():
     st.session_state.last_word_help = ""
     st.session_state.word_help_answer = ""
     st.session_state.voice_text = ""
+    st.session_state.last_new_badge = ""
 
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
@@ -1297,6 +1302,10 @@ elif st.session_state.phase == "setup":
 # =========================================================
 elif st.session_state.phase == "pre":
     st.subheader("🟦 Okuma Öncesi (PRE-READING)")
+    if st.session_state.get("last_new_badge"):
+        show_big_badge_popup(st.session_state.last_new_badge)
+        st.session_state.last_new_badge = ""
+
     st.markdown("<div class='fun-badge'>🧩 1. Aşama: Hazırlanıyoruz</div>", unsafe_allow_html=True)
     st.markdown("""
     <div class='mini-progress'>
@@ -1330,7 +1339,7 @@ elif st.session_state.phase == "pre":
 
         if st.session_state.prediction:
             save_reading_process("PRE_PREDICTION", st.session_state.prediction, paragraf_no=None)
-            award_badge("🔮 Tahmin Yaptım")
+            award_badge("🔮 Tahmin Yıldızı")
         save_reading_process("PRE_ATTENTION", "Evet" if attention else "Hayır", paragraf_no=None)
         save_reading_process("PRE_SPEED", speed, paragraf_no=None)
 
@@ -1342,6 +1351,10 @@ elif st.session_state.phase == "pre":
 # =========================================================
 elif st.session_state.phase == "during":
     st.subheader("🟩 Okuma Sırası (DURING-READING)")
+    if st.session_state.get("last_new_badge"):
+        show_big_badge_popup(st.session_state.last_new_badge)
+        st.session_state.last_new_badge = ""
+
     st.markdown("<div class='fun-badge'>📖 2. Aşama: Şimdi okuma zamanı</div>", unsafe_allow_html=True)
     st.markdown("""
     <div class='mini-progress'>
@@ -1383,7 +1396,7 @@ elif st.session_state.phase == "during":
                 fp = get_audio(paras[p_idx])
                 if fp:
                     st.audio(fp, format="audio/mp3")
-                    award_badge("🎧 Dinledim")
+                    award_badge("🎧 Dikkatli Dinleyici")
 
         with c2:
             st.markdown(
@@ -1397,19 +1410,28 @@ elif st.session_state.phase == "during":
         st.markdown(f"<div class='highlight-box'>{paras[p_idx]}</div>", unsafe_allow_html=True)
 
         # Kelime desteği
-        st.markdown("<div class='card'><b>🧩 Zor kelimeye yardım</b><br/>İstersen bölümden bir kelime seçip anlamını öğrenebilirsin.</div>", unsafe_allow_html=True)
-        candidate_words = extract_candidate_words(paras[p_idx], min_len=6, max_count=12)
-        if candidate_words:
-            selected_word = st.selectbox("Kelime seç:", [""] + candidate_words, key=f"word_help_select_{p_idx}")
-            if st.button("Kelimeyi Açıkla", key=f"word_help_btn_{p_idx}") and selected_word:
-                try:
-                    ans = explain_word_simple(selected_word, paras[p_idx])
-                    st.session_state.last_word_help = selected_word
-                    st.session_state.word_help_answer = ans
-                    save_reading_process("WORD_HELP", f"{selected_word} | {ans}", paragraf_no=p_idx + 1)
-                    award_badge("📘 Kelime Kâşifi")
-                except Exception:
-                    st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
+        st.markdown(
+            "<div class='card'><b>🧩 Bilmediğin kelimeyi yaz</b><br/>Metinde anlamını bilmediğin bir kelime varsa yaz, Okuma Dostum açıklasın.</div>",
+            unsafe_allow_html=True
+        )
+
+        unknown_word = st.text_input(
+            "Bilmediğin kelime:",
+            value="",
+            key=f"unknown_word_input_{p_idx}",
+            placeholder="Örneğin: cesaret, barınak, telaş..."
+        )
+
+        if st.button("Kelimeyi Açıkla", key=f"word_help_btn_{p_idx}") and unknown_word.strip():
+            try:
+                ans = explain_word_simple(unknown_word.strip(), paras[p_idx])
+                st.session_state.last_word_help = unknown_word.strip()
+                st.session_state.word_help_answer = ans
+                save_reading_process("WORD_HELP", f"{unknown_word.strip()} | {ans}", paragraf_no=p_idx + 1)
+                award_badge("📘 Kelime Avcısı")
+            except Exception:
+                st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
+
         if st.session_state.get("word_help_answer"):
             st.info(f"🧠 {st.session_state.get('last_word_help','Kelime')}: {st.session_state.word_help_answer}")
 
@@ -1420,11 +1442,11 @@ elif st.session_state.phase == "during":
                 st.session_state.reread_count += 1
                 save_reading_process("REPEAT_READ", "Bölüm tekrar okundu", paragraf_no=p_idx + 1)
                 st.info("Tekrar okudun. Hazır olunca devam edebilirsin.")
-                award_badge("🔁 Tekrar Okudum")
+                award_badge("🔁 Süper Tekrarcı")
         with coln2:
             if st.button("➡️ Sonraki bölüm", key=f"next_p_{p_idx}"):
                 if (p_idx + 1) >= len(paras):
-                    award_badge("📖 Metni Bitirdim")
+                    award_badge("📖 Metin Kâşifi")
                 st.session_state.p_idx = p_idx + 1
                 st.rerun()
     else:
@@ -1439,7 +1461,7 @@ elif st.session_state.phase == "during":
                     st.session_state.final_important_saved = True
                     save_reading_process("IMPORTANT_NOTE_FINAL", st.session_state.final_important_note.strip(), paragraf_no=None)
                     st.success("Kaydedildi!")
-                    award_badge("📌 Önemli Nokta Bulucu")
+                    award_badge("📌 İpucu Dedektifi")
                 else:
                     st.info("Zaten kaydedildi.")
             else:
@@ -1460,6 +1482,10 @@ elif st.session_state.phase == "during":
 # =========================================================
 elif st.session_state.phase == "post":
     st.subheader("🟧 Okuma Sonrası (POST-READING)")
+    if st.session_state.get("last_new_badge"):
+        show_big_badge_popup(st.session_state.last_new_badge)
+        st.session_state.last_new_badge = ""
+
     st.markdown("<div class='fun-badge'>🧠 3. Aşama: Düşünme ve toplama zamanı</div>", unsafe_allow_html=True)
     st.markdown("""
     <div class='mini-progress'>
@@ -1501,7 +1527,7 @@ elif st.session_state.phase == "post":
                 fb = generate_summary_feedback(metin, st.session_state.summary)
                 st.session_state.summary_feedback = fb
                 save_reading_process("AI_SUMMARY_FEEDBACK", fb, paragraf_no=None)
-                award_badge("📝 Özet Ustası")
+                award_badge("📝 Özet Kahramanı")
             except Exception:
                 st.session_state.summary_feedback = ""
         st.success("✅ Özet kaydedildi!")
@@ -1524,7 +1550,7 @@ elif st.session_state.phase == "post":
         save_reading_process("POST_REFLECTION_STRATEGY", st.session_state.reflection_strategy or "(boş)", paragraf_no=None)
         save_reading_process("POST_REFLECTION_NEXT", st.session_state.reflection_next_time or "(boş)", paragraf_no=None)
         st.success("✅ Kaydedildi!")
-        award_badge("🧠 Düşünen Okuyucu")
+        award_badge("🧠 Düşünen Beyin")
 
     st.divider()
     st.subheader("🗺️ Öykü Haritası (Story Map)")
@@ -1575,7 +1601,7 @@ elif st.session_state.phase == "post":
 
                     st.success(f"✅ Kaydedildi! AI Puan: {total}/12")
                     st.caption(f"Gerekçe: {reason}")
-                    award_badge("🗺️ Öykü Haritası Tamamlandı")
+                    award_badge("🗺️ Harita Ustası")
 
     with col_b:
         st.markdown(
@@ -1614,7 +1640,7 @@ elif st.session_state.phase == "post":
             st.session_state.chat_messages.append({"role": "assistant", "content": reply})
             save_reading_process("CHAT_USER", user_msg.strip(), paragraf_no=None)
             save_reading_process("CHATBOT_REPLY", reply, paragraf_no=None)
-            award_badge("💬 Chatbotla Konuştum")
+            award_badge("💬 Sohbetçi Kâşif")
             st.rerun()
         except Exception:
             st.warning("Şu anda chatbot yanıtı üretilemedi.")
@@ -1627,6 +1653,11 @@ elif st.session_state.phase == "post":
 # 6) QUESTIONS
 # =========================================================
 elif st.session_state.phase == "questions":
+    st.subheader("❓ Sorular")
+    if st.session_state.get("last_new_badge"):
+        show_big_badge_popup(st.session_state.last_new_badge)
+        st.session_state.last_new_badge = ""
+
     sorular = st.session_state.activity.get("sorular", [])
     i = st.session_state.get("q_idx", 0)
     total_q = len(sorular)
@@ -1690,9 +1721,9 @@ elif st.session_state.phase == "questions":
                     st.success("🌟 Doğru!")
                     st.session_state.ai_hint_text = ""
                     if current_hint_level == 0:
-                        award_badge("🏅 İpucusuz Doğru")
+                        award_badge("🏅 Tek Atışta Doğru")
                     else:
-                        award_badge("💡 İpucuyla Başardım")
+                        award_badge("💡 Yardımla Başardım")
                     st.session_state.q_idx = i + 1
                     st.rerun()
                 else:
@@ -1737,7 +1768,7 @@ elif st.session_state.phase == "questions":
                     paragraf_no=None
                 )
                 st.info(f"🤖 Chatbot ipucu: (İpucu {next_level}) {ai_hint}")
-                award_badge("💡 İpucu Kullandım")
+                award_badge("💡 Akıllı Yardımcı")
             except Exception:
                 st.info("📌 Metni açtım. Anahtar kelimeleri metinde ara ve ilgili bölümü tekrar oku.")
 
@@ -1788,9 +1819,9 @@ elif st.session_state.phase == "questions":
             ok = append_row_safe("Performans", row)
             if ok:
                 if dogru == total_q and total_q > 0:
-                    award_badge("🏆 Tüm Sorular Doğru")
+                    award_badge("🏆 Soru Şampiyonu")
                 if st.session_state.get("hints", 0) == 0:
-                    award_badge("🌟 İpucusuz Tamamlama")
+                    award_badge("🌟 Gizli Güç")
 
                 st.session_state.last_report = {
                     "basari_yuzde": basari_yuzde,
@@ -1828,6 +1859,10 @@ elif st.session_state.phase == "questions":
 elif st.session_state.phase == "done":
     st.balloons()
     st.success("✅ Bugünkü çalışman kaydedildi!")
+    if st.session_state.get("last_new_badge"):
+        show_big_badge_popup(st.session_state.last_new_badge)
+        st.session_state.last_new_badge = ""
+
     st.markdown("<div class='fun-badge'>🏆 Tebrikler! Bugünkü görevi tamamladın</div>", unsafe_allow_html=True)
     st.markdown("""
     <div class='mini-progress'>
@@ -1836,6 +1871,12 @@ elif st.session_state.phase == "done":
     """, unsafe_allow_html=True)
 
     rep = st.session_state.get("last_report", {}) or {}
+
+    total_badges = len(st.session_state.get("badges", []))
+    st.markdown(
+        f"<div class='mini-success'>🏅 Toplam {total_badges} rozet kazandın!</div>",
+        unsafe_allow_html=True
+    )
     render_badges()
 
     if rep:
