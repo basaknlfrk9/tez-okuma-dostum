@@ -213,6 +213,74 @@ def _norm(x) -> str:
 def now_tr() -> str:
     return datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
 
+
+def go_to_phase(target_phase: str):
+    st.session_state.phase = target_phase
+    st.rerun()
+
+def show_success_celebration(message: str = "Harika!"):
+    st.balloons()
+    st.markdown(
+        f"""
+        <div style="
+            background: linear-gradient(135deg, #ffe082 0%, #ffb74d 100%);
+            color: #4e342e;
+            padding: 22px;
+            border-radius: 24px;
+            text-align: center;
+            font-size: 26px;
+            font-weight: 700;
+            margin: 14px 0 18px 0;
+            box-shadow: 0 10px 22px rgba(0,0,0,0.12);
+            border: 3px solid #fff3c4;
+        ">
+            🏅 1 Rozet Kazandın! <br/>
+            <span style="font-size:22px;">{message}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+def maybe_log_once(key: str, kayit_turu: str, value: str, paragraf_no=None):
+    value = str(value or "").strip()
+    cache = st.session_state.get("autosave_cache", {}) or {}
+    if cache.get(key) != value:
+        cache[key] = value
+        st.session_state.autosave_cache = cache
+        save_reading_process(kayit_turu, value if value else "(boş)", paragraf_no=paragraf_no)
+
+def render_back_button(target_phase: str, label: str = "⬅️ Geri Dön"):
+    if st.button(label, key=f"back_{target_phase}_{st.session_state.get('phase','')}"):
+        go_to_phase(target_phase)
+
+def build_report_chart_bytes(rep: dict):
+    try:
+        import matplotlib.pyplot as plt
+        labels = ["Süre (dk)", "Doğru", "Yanlış", "İpucu", "Tekrar", "Dinleme", "Tekrar Okuma"]
+        wrong = max(int(rep.get("total_q", 0)) - int(rep.get("dogru", 0)), 0)
+        values = [
+            float(rep.get("sure_dk", 0)),
+            int(rep.get("dogru", 0)),
+            int(wrong),
+            int(rep.get("hints", 0)),
+            int(rep.get("repeat_count", 0)),
+            int(rep.get("tts_count", 0)),
+            int(rep.get("reread_count", 0)),
+        ]
+        fig, ax = plt.subplots(figsize=(9, 4.8))
+        ax.bar(labels, values)
+        ax.set_title("Bugünkü Okuma Özeti")
+        ax.tick_params(axis='x', rotation=25)
+        fig.tight_layout()
+        from io import BytesIO
+        buf = BytesIO()
+        fig.savefig(buf, format='png', dpi=180, bbox_inches='tight')
+        plt.close(fig)
+        buf.seek(0)
+        return buf.getvalue()
+    except Exception:
+        return None
+
 def extract_metin_number(metin_id: str) -> int:
     s = _norm(metin_id)
     m = re.search(r"(\d+)", s)
@@ -298,205 +366,22 @@ def get_storymap_templates():
         "cozum": "Sonunda ... oldu."
     }
 
-def show_big_badge_popup(text: str):
-    st.markdown(
-        f"""
-        <div style="
-            background: linear-gradient(135deg, #ffe082 0%, #ffb74d 100%);
-            color: #4e342e;
-            padding: 22px;
-            border-radius: 24px;
-            text-align: center;
-            font-size: 26px;
-            font-weight: 700;
-            margin: 14px 0 18px 0;
-            box-shadow: 0 10px 22px rgba(0,0,0,0.12);
-            border: 3px solid #fff3c4;
-        ">
-            🏅 1 Rozet Kazandın! <br/>
-            <span style="font-size:22px;">{text}</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-def award_badge(name: str):
-    badges = st.session_state.get("badges", [])
-    if name not in badges:
-        badges.append(name)
-        st.session_state.badges = badges
-        st.session_state.last_new_badge = name
-    else:
-        st.session_state.badges = badges
+def award_badge_for_correct_answer(question_no: int):
+    st.session_state.last_new_badge = f"{question_no}. soruyu doğru bildin!"
+    st.session_state.badges = [f"Soru {question_no} Rozeti"]
 
 def render_badges():
-    badges = st.session_state.get("badges", [])
-    if badges:
-        html = "".join([f"<span class='badge-chip'>{b}</span>" for b in badges])
-        st.markdown(f"<div><b>Kazandığın Rozetler</b><br/>{html}</div>", unsafe_allow_html=True)
+    return
 
 # =========================================================
 # METİN BÖLME
+# Kullanıcı isteğiyle metin artık bölünmüyor.
 # =========================================================
-def _split_sentences_tr(s: str):
-    s = re.sub(r"\s+", " ", (s or "").strip())
-    if not s:
-        return []
-    parts = re.split(r"(?<=[.!?…])\s+", s)
-    return [p.strip() for p in parts if p.strip()]
-
-def _force_split_long_text(text: str, max_len: int):
-    text = (text or "").strip()
-    if len(text) <= max_len:
-        return [text]
-
-    if "," in text:
-        pieces, buf = [], ""
-        for part in text.split(","):
-            part = part.strip()
-            candidate = (buf + (", " if buf else "") + part).strip()
-            if len(candidate) <= max_len:
-                buf = candidate
-            else:
-                if buf:
-                    pieces.append(buf)
-                buf = part
-        if buf:
-            pieces.append(buf)
-        return pieces
-
-    for conj in [" çünkü ", " ama ", " fakat ", " ancak ", " ve ", " sonra ", " böylece "]:
-        if conj in text:
-            chunks, buf = [], ""
-            parts = text.split(conj)
-            for i, part in enumerate(parts):
-                part = part.strip()
-                glue = conj.strip() if i > 0 else ""
-                candidate = (buf + (" " + glue + " " if buf and glue else "") + part).strip()
-                if len(candidate) <= max_len:
-                    buf = candidate
-                else:
-                    if buf:
-                        chunks.append(buf)
-                    buf = (glue + " " + part).strip() if glue else part
-            if buf:
-                chunks.append(buf)
-
-            final = []
-            for c in chunks:
-                if len(c) > max_len:
-                    final.extend(_force_split_long_text(c, max_len=max_len))
-                else:
-                    final.append(c)
-            return final
-
-    words = text.split()
-    out, buf = [], ""
-    for w in words:
-        cand = (buf + " " + w).strip()
-        if len(cand) <= max_len:
-            buf = cand
-        else:
-            if buf:
-                out.append(buf)
-            buf = w
-    if buf:
-        out.append(buf)
-    return out
-
 def split_paragraphs(text: str, target_min=500, target_max=800, tail_min=180):
-    text = (text or "").replace("\r", "\n").strip()
+    text = (text or "").strip()
     if not text:
         return []
-
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    placeholder = "<<<P>>>"
-    text = re.sub(r"\n\s*\n", placeholder, text)
-    text = re.sub(r"\n+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    text = text.replace(placeholder, "\n\n")
-
-    raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
-    if not raw_paras:
-        raw_paras = [text]
-
-    merged = []
-    buf = ""
-    for p in raw_paras:
-        if not buf:
-            buf = p
-        else:
-            if len(buf) < target_min:
-                buf = (buf + " " + p).strip()
-            else:
-                merged.append(buf)
-                buf = p
-    if buf:
-        merged.append(buf)
-
-    out = []
-    for para in merged:
-        sents = _split_sentences_tr(para)
-        if not sents:
-            out.extend(_force_split_long_text(para, max_len=target_max))
-            continue
-
-        block = ""
-        for s in sents:
-            if not block:
-                block = s
-                if len(block) > target_max:
-                    out.extend(_force_split_long_text(block, max_len=target_max))
-                    block = ""
-                continue
-
-            cand = (block + " " + s).strip()
-            if len(cand) <= target_max:
-                block = cand
-            else:
-                if len(block) < target_min:
-                    pieces = _force_split_long_text(
-                        s,
-                        max_len=max(200, target_max - len(block) - 1)
-                    )
-                    for piece in pieces:
-                        cand2 = (block + " " + piece).strip()
-                        if len(cand2) <= target_max:
-                            block = cand2
-                        else:
-                            out.append(block)
-                            block = piece
-                else:
-                    out.append(block)
-                    block = s
-
-                if len(block) > target_max:
-                    out.extend(_force_split_long_text(block, max_len=target_max))
-                    block = ""
-
-        if block:
-            out.append(block)
-
-    final = []
-    buf = ""
-    for b in out:
-        if not buf:
-            buf = b
-        else:
-            if len(buf) < target_min and (len(buf) + 1 + len(b)) <= (target_max + 300):
-                buf = (buf + " " + b).strip()
-            else:
-                final.append(buf)
-                buf = b
-    if buf:
-        final.append(buf)
-
-    if len(final) >= 2 and len(final[-1]) < tail_min:
-        if len(final[-2]) + 1 + len(final[-1]) <= (target_max + 350):
-            final[-2] = (final[-2] + " " + final[-1]).strip()
-            final.pop()
-
-    return final
+    return [text]
 
 # =========================================================
 # OPENAI
@@ -941,7 +826,10 @@ def _story_replace_synonyms(s: str) -> str:
         "yardim": ["destek", "yardim etti", "yardım etti", "yardimci oldu", "yardımcı oldu"],
         "orman": ["agaclik", "ağaçlık", "agac", "ağaç"],
         "sabah": ["gunduz", "gündüz", "erken", "sabah vakti"],
-        "cozum": ["sonuc", "sonuç", "care", "çare"]
+        "cozum": ["sonuc", "sonuç", "care", "çare"],
+        "mutlu": ["sevindi", "sevincli", "sevinçli", "mutluydu"],
+        "korktu": ["ürktü", "urktu", "endiselendi", "endişelendi"],
+        "arkadas": ["dost", "arkadaşı", "arkadasi"],
     }
 
     for canon, variants in synonym_map.items():
@@ -1066,11 +954,11 @@ Kurallar:
 - score sadece 0, 1 veya 2 olsun.
 
 JSON şeması:
-{{
+{
   "score": 0,
   "evidence": "",
   "reason": ""
-}}
+}
 """
     user = json.dumps({
         "alan": field_name,
@@ -1208,9 +1096,12 @@ def reset_activity_states():
     st.session_state.chat_messages = []
     st.session_state.badges = []
     st.session_state.last_word_help = ""
+    st.session_state.autosave_cache = {}
+    st.session_state.graph_png_bytes = None
     st.session_state.word_help_answer = ""
     st.session_state.voice_text = ""
     st.session_state.last_new_badge = ""
+    st.session_state.summary_feedback_done = False
 
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
@@ -1303,7 +1194,7 @@ elif st.session_state.phase == "setup":
 elif st.session_state.phase == "pre":
     st.subheader("🟦 Okuma Öncesi (PRE-READING)")
     if st.session_state.get("last_new_badge"):
-        show_big_badge_popup(st.session_state.last_new_badge)
+        show_success_celebration(st.session_state.last_new_badge)
         st.session_state.last_new_badge = ""
 
     st.markdown("<div class='fun-badge'>🧩 1. Aşama: Hazırlanıyoruz</div>", unsafe_allow_html=True)
@@ -1332,19 +1223,20 @@ elif st.session_state.phase == "pre":
     st.markdown("<div class='card'><b>3) Okuma Hızı Seç</b><br/>Bugün nasıl okumak istersin?</div>", unsafe_allow_html=True)
     speed = st.radio("Okuma hızı:", ["Yavaş", "Orta", "Hızlı"], index=["Yavaş", "Orta", "Hızlı"].index(st.session_state.reading_speed))
 
-    if st.button("Okumaya Başla ➜"):
-        st.session_state.prediction = curiosity.strip()
-        st.session_state.attention_ok = attention
-        st.session_state.reading_speed = speed
+    maybe_log_once("pre_prediction", "PRE_PREDICTION_AUTO", curiosity.strip(), paragraf_no=None)
+    maybe_log_once("pre_attention", "PRE_ATTENTION_AUTO", "Evet" if attention else "Hayır", paragraf_no=None)
+    maybe_log_once("pre_speed", "PRE_SPEED_AUTO", speed, paragraf_no=None)
 
-        if st.session_state.prediction:
-            save_reading_process("PRE_PREDICTION", st.session_state.prediction, paragraf_no=None)
-            award_badge("🔮 Tahmin Yıldızı")
-        save_reading_process("PRE_ATTENTION", "Evet" if attention else "Hayır", paragraf_no=None)
-        save_reading_process("PRE_SPEED", speed, paragraf_no=None)
-
-        st.session_state.phase = "during"
-        st.rerun()
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Okumaya Başla ➜"):
+            st.session_state.prediction = curiosity.strip()
+            st.session_state.attention_ok = attention
+            st.session_state.reading_speed = speed
+            st.session_state.phase = "during"
+            st.rerun()
+    with c2:
+        render_back_button("setup", "⬅️ Metin Seçimine Dön")
 
 # =========================================================
 # 4) DURING
@@ -1352,7 +1244,7 @@ elif st.session_state.phase == "pre":
 elif st.session_state.phase == "during":
     st.subheader("🟩 Okuma Sırası (DURING-READING)")
     if st.session_state.get("last_new_badge"):
-        show_big_badge_popup(st.session_state.last_new_badge)
+        show_success_celebration(st.session_state.last_new_badge)
         st.session_state.last_new_badge = ""
 
     st.markdown("<div class='fun-badge'>📖 2. Aşama: Şimdi okuma zamanı</div>", unsafe_allow_html=True)
@@ -1364,118 +1256,73 @@ elif st.session_state.phase == "during":
     st.markdown("<div class='section-soft-green'><b>Okuma Zamanı</b><br/>İstersen dinleyebilir, istersen tekrar okuyabilirsin.</div>", unsafe_allow_html=True)
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
-    metin_hash = hash(metin)
-    if st.session_state.get("metin_hash") != metin_hash:
-        st.session_state.paragraphs = split_paragraphs(
-            metin,
-            target_min=500,
-            target_max=800,
-            tail_min=180
-        )
-        st.session_state.metin_hash = metin_hash
-
-    paras = st.session_state.get("paragraphs", []) or []
-    p_idx = st.session_state.get("p_idx", 0)
-    total_paras = max(len(paras), 1)
-    progress_ratio = p_idx / total_paras if total_paras else 0
+    st.markdown(f"<div class='mini-success'>{get_motivation_message('during', 1.0)}</div>", unsafe_allow_html=True)
 
     st.markdown(
-        f"<div class='mini-success'>{get_motivation_message('during', progress_ratio)}</div>",
+        f"<div class='small-note'>Seçtiğin hız: <b>{st.session_state.reading_speed}</b> | "
+        f"Tekrar (dinleme+tekrar okuma): <b>{st.session_state.repeat_count}</b></div>",
         unsafe_allow_html=True
     )
 
-    render_badges()
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("🔊 Metni Dinle"):
+            st.session_state.repeat_count += 1
+            st.session_state.tts_count += 1
+            save_reading_process("TTS_PLAY", "Metin dinlendi", paragraf_no=1)
+            fp = get_audio(metin)
+            if fp:
+                st.audio(fp, format="audio/mp3")
+    with c2:
+        if st.button("🔁 Metni Tekrar Oku"):
+            st.session_state.repeat_count += 1
+            st.session_state.reread_count += 1
+            save_reading_process("REPEAT_READ", "Metin tekrar okundu", paragraf_no=1)
+            st.info("Metni tekrar okuyabilirsin.")
+    with c3:
+        render_back_button("pre", "⬅️ Önceki Aşamaya Dön")
 
-    if p_idx < len(paras):
-        c1, c2 = st.columns([2, 5])
-        with c1:
-            if st.button("🔊 Bu bölümü dinle"):
-                st.session_state.repeat_count += 1
-                st.session_state.tts_count += 1
-                save_reading_process("TTS_PLAY", "Bölüm dinlendi", paragraf_no=p_idx + 1)
-                fp = get_audio(paras[p_idx])
-                if fp:
-                    st.audio(fp, format="audio/mp3")
-                    award_badge("🎧 Dikkatli Dinleyici")
+    st.divider()
+    st.markdown(f"<div class='highlight-box'>{metin}</div>", unsafe_allow_html=True)
 
-        with c2:
-            st.markdown(
-                f"<div class='small-note'>Seçtiğin hız: <b>{st.session_state.reading_speed}</b> | "
-                f"Tekrar (dinleme+tekrar okuma): <b>{st.session_state.repeat_count}</b> | "
-                f"Bölüm: <b>{min(p_idx+1, len(paras))}/{len(paras)}</b></div>",
-                unsafe_allow_html=True
-            )
+    st.markdown("<div class='card'><b>Metnin En Önemli Şeyi</b><br/>Sence bu metindeki en önemli şey neydi? (1 cümle)</div>", unsafe_allow_html=True)
+    final_note = st.text_input("En önemli şey:", value=st.session_state.final_important_note)
+    st.session_state.final_important_note = final_note
+    maybe_log_once("important_note_auto", "IMPORTANT_NOTE_FINAL_AUTO", final_note.strip(), paragraf_no=None)
 
-        st.divider()
-        st.markdown(f"<div class='highlight-box'>{paras[p_idx]}</div>", unsafe_allow_html=True)
+    st.divider()
+    st.markdown("<div class='card'><b>Ön Bilgi</b><br/>Bu metin sana daha önce yaşadığın/duyduğun bir şeyi hatırlattı mı?</div>", unsafe_allow_html=True)
+    pk = st.text_area("Varsa kısaca yaz:", value=st.session_state.prior_knowledge, height=100)
+    st.session_state.prior_knowledge = pk.strip()
+    maybe_log_once("prior_knowledge_auto", "PRIOR_KNOWLEDGE_AUTO", pk.strip(), paragraf_no=None)
 
-        # Kelime desteği
-        st.markdown(
-            "<div class='card'><b>🧩 Bilmediğin kelimeyi yaz</b><br/>Metinde anlamını bilmediğin bir kelime varsa yaz, Okuma Dostum açıklasın.</div>",
-            unsafe_allow_html=True
-        )
+    st.divider()
+    st.markdown(
+        "<div class='card'><b>🧩 Bilmediğin kelimeyi yaz</b><br/>Metni bitirdiysen anlamını bilmediğin bir kelimeyi yaz, Okuma Dostum açıklasın.</div>",
+        unsafe_allow_html=True
+    )
+    unknown_word = st.text_input(
+        "Bilmediğin kelime:",
+        value="",
+        key="unknown_word_input_end",
+        placeholder="Örneğin: cesaret, barınak, telaş..."
+    )
 
-        unknown_word = st.text_input(
-            "Bilmediğin kelime:",
-            value="",
-            key=f"unknown_word_input_{p_idx}",
-            placeholder="Örneğin: cesaret, barınak, telaş..."
-        )
+    if st.button("Kelimeyi Açıkla", key="word_help_btn_end") and unknown_word.strip():
+        try:
+            ans = explain_word_simple(unknown_word.strip(), metin)
+            st.session_state.last_word_help = unknown_word.strip()
+            st.session_state.word_help_answer = ans
+            save_reading_process("WORD_HELP", f"{unknown_word.strip()} | {ans}", paragraf_no=None)
+        except Exception:
+            st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
 
-        if st.button("Kelimeyi Açıkla", key=f"word_help_btn_{p_idx}") and unknown_word.strip():
-            try:
-                ans = explain_word_simple(unknown_word.strip(), paras[p_idx])
-                st.session_state.last_word_help = unknown_word.strip()
-                st.session_state.word_help_answer = ans
-                save_reading_process("WORD_HELP", f"{unknown_word.strip()} | {ans}", paragraf_no=p_idx + 1)
-                award_badge("📘 Kelime Avcısı")
-            except Exception:
-                st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
+    if st.session_state.get("word_help_answer"):
+        st.info(f"🧠 {st.session_state.get('last_word_help','Kelime')}: {st.session_state.word_help_answer}")
 
-        if st.session_state.get("word_help_answer"):
-            st.info(f"🧠 {st.session_state.get('last_word_help','Kelime')}: {st.session_state.word_help_answer}")
-
-        coln1, coln2 = st.columns(2)
-        with coln1:
-            if st.button("🔁 Bu bölümü tekrar oku", key=f"repeat_p_{p_idx}"):
-                st.session_state.repeat_count += 1
-                st.session_state.reread_count += 1
-                save_reading_process("REPEAT_READ", "Bölüm tekrar okundu", paragraf_no=p_idx + 1)
-                st.info("Tekrar okudun. Hazır olunca devam edebilirsin.")
-                award_badge("🔁 Süper Tekrarcı")
-        with coln2:
-            if st.button("➡️ Sonraki bölüm", key=f"next_p_{p_idx}"):
-                if (p_idx + 1) >= len(paras):
-                    award_badge("📖 Metin Kâşifi")
-                st.session_state.p_idx = p_idx + 1
-                st.rerun()
-    else:
-        st.markdown("<div class='mini-success'>🌟 Metni bitirdin! Şimdi önemli kısmı hatırlayalım.</div>", unsafe_allow_html=True)
-
-        st.markdown("<div class='card'><b>Metnin En Önemli Şeyi</b><br/>Sence bu metindeki en önemli şey neydi? (1 cümle)</div>", unsafe_allow_html=True)
-        st.session_state.final_important_note = st.text_input("En önemli şey:", value=st.session_state.final_important_note)
-
-        if st.button("📌 Kaydet (1 kez)"):
-            if st.session_state.final_important_note.strip():
-                if not st.session_state.final_important_saved:
-                    st.session_state.final_important_saved = True
-                    save_reading_process("IMPORTANT_NOTE_FINAL", st.session_state.final_important_note.strip(), paragraf_no=None)
-                    st.success("Kaydedildi!")
-                    award_badge("📌 İpucu Dedektifi")
-                else:
-                    st.info("Zaten kaydedildi.")
-            else:
-                st.warning("Bir cümle yaz.")
-
-        st.divider()
-        st.markdown("<div class='card'><b>Ön Bilgi</b><br/>Bu metin sana daha önce yaşadığın/duyduğun bir şeyi hatırlattı mı?</div>", unsafe_allow_html=True)
-        pk = st.text_area("Varsa kısaca yaz:", value=st.session_state.prior_knowledge, height=100)
-
-        if st.button("Okuma Sonrasına Geç ➜"):
-            st.session_state.prior_knowledge = pk.strip()
-            save_reading_process("PRIOR_KNOWLEDGE", pk.strip() if pk.strip() else "(boş)", paragraf_no=None)
-            st.session_state.phase = "post"
-            st.rerun()
+    if st.button("Okuma Sonrasına Geç ➜"):
+        st.session_state.phase = "post"
+        st.rerun()
 
 # =========================================================
 # 5) POST
@@ -1483,7 +1330,7 @@ elif st.session_state.phase == "during":
 elif st.session_state.phase == "post":
     st.subheader("🟧 Okuma Sonrası (POST-READING)")
     if st.session_state.get("last_new_badge"):
-        show_big_badge_popup(st.session_state.last_new_badge)
+        show_success_celebration(st.session_state.last_new_badge)
         st.session_state.last_new_badge = ""
 
     st.markdown("<div class='fun-badge'>🧠 3. Aşama: Düşünme ve toplama zamanı</div>", unsafe_allow_html=True)
@@ -1496,7 +1343,6 @@ elif st.session_state.phase == "post":
     st.markdown(f"<div class='mini-success'>{get_motivation_message('post')}</div>", unsafe_allow_html=True)
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
-    render_badges()
 
     st.markdown("<div class='card'><b>Özetleme</b><br/>Metni 2–3 cümleyle anlat.</div>", unsafe_allow_html=True)
 
@@ -1509,7 +1355,6 @@ elif st.session_state.phase == "post":
                 st.session_state.summary = text
                 st.session_state.voice_text = text
                 save_reading_process("VOICE_TO_TEXT", text, paragraf_no=None)
-                award_badge("🎤 Sesli Yanıt")
                 st.success("Sesin yazıya çevrildi.")
             else:
                 st.warning("Ses şu anda yazıya çevrilemedi.")
@@ -1518,19 +1363,17 @@ elif st.session_state.phase == "post":
         st.info(f"📝 Sesli yanıt metni: {st.session_state.voice_text}")
 
     summ = st.text_area("Özetin:", value=st.session_state.summary, height=120)
+    st.session_state.summary = summ.strip()
+    maybe_log_once("summary_auto", "POST_SUMMARY_AUTO", st.session_state.summary, paragraf_no=None)
 
-    if st.button("Özeti Kaydet ✅"):
-        st.session_state.summary = summ.strip()
-        if st.session_state.summary:
-            save_reading_process("POST_SUMMARY", st.session_state.summary, paragraf_no=None)
-            try:
-                fb = generate_summary_feedback(metin, st.session_state.summary)
-                st.session_state.summary_feedback = fb
-                save_reading_process("AI_SUMMARY_FEEDBACK", fb, paragraf_no=None)
-                award_badge("📝 Özet Kahramanı")
-            except Exception:
-                st.session_state.summary_feedback = ""
-        st.success("✅ Özet kaydedildi!")
+    if st.session_state.summary and not st.session_state.get("summary_feedback_done", False):
+        try:
+            fb = generate_summary_feedback(metin, st.session_state.summary)
+            st.session_state.summary_feedback = fb
+            st.session_state.summary_feedback_done = True
+            save_reading_process("AI_SUMMARY_FEEDBACK", fb, paragraf_no=None)
+        except Exception:
+            st.session_state.summary_feedback = ""
 
     if st.session_state.get("summary_feedback"):
         st.info(f"🤖 Chatbot geri bildirimi: {st.session_state.summary_feedback}")
@@ -1544,13 +1387,11 @@ elif st.session_state.phase == "post":
     st.markdown("<div class='card'><b>Bir dahaki metinde neyi farklı yapacağım?</b><br/>1 cümle yaz.</div>", unsafe_allow_html=True)
     r2 = st.text_input("Bir dahaki sefere:", value=st.session_state.get("reflection_next_time", ""))
 
-    if st.button("Kısa değerlendirmeyi kaydet ✅"):
-        st.session_state.reflection_strategy = (r1 or "").strip()
-        st.session_state.reflection_next_time = (r2 or "").strip()
-        save_reading_process("POST_REFLECTION_STRATEGY", st.session_state.reflection_strategy or "(boş)", paragraf_no=None)
-        save_reading_process("POST_REFLECTION_NEXT", st.session_state.reflection_next_time or "(boş)", paragraf_no=None)
-        st.success("✅ Kaydedildi!")
-        award_badge("🧠 Düşünen Beyin")
+    st.session_state.reflection_strategy = (r1 or "").strip()
+    st.session_state.reflection_next_time = (r2 or "").strip()
+
+    maybe_log_once("reflection_strategy_auto", "POST_REFLECTION_STRATEGY_AUTO", st.session_state.reflection_strategy, paragraf_no=None)
+    maybe_log_once("reflection_next_auto", "POST_REFLECTION_NEXT_AUTO", st.session_state.reflection_next_time, paragraf_no=None)
 
     st.divider()
     st.subheader("🗺️ Öykü Haritası (Story Map)")
@@ -1601,7 +1442,6 @@ elif st.session_state.phase == "post":
 
                     st.success(f"✅ Kaydedildi! AI Puan: {total}/12")
                     st.caption(f"Gerekçe: {reason}")
-                    award_badge("🗺️ Harita Ustası")
 
     with col_b:
         st.markdown(
@@ -1640,14 +1480,17 @@ elif st.session_state.phase == "post":
             st.session_state.chat_messages.append({"role": "assistant", "content": reply})
             save_reading_process("CHAT_USER", user_msg.strip(), paragraf_no=None)
             save_reading_process("CHATBOT_REPLY", reply, paragraf_no=None)
-            award_badge("💬 Sohbetçi Kâşif")
             st.rerun()
         except Exception:
             st.warning("Şu anda chatbot yanıtı üretilemedi.")
 
-    if st.button("Sorulara Geç ➜"):
-        st.session_state.phase = "questions"
-        st.rerun()
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Sorulara Geç ➜"):
+            st.session_state.phase = "questions"
+            st.rerun()
+    with c2:
+        render_back_button("during", "⬅️ Metne Geri Dön")
 
 # =========================================================
 # 6) QUESTIONS
@@ -1655,7 +1498,7 @@ elif st.session_state.phase == "post":
 elif st.session_state.phase == "questions":
     st.subheader("❓ Sorular")
     if st.session_state.get("last_new_badge"):
-        show_big_badge_popup(st.session_state.last_new_badge)
+        show_success_celebration(st.session_state.last_new_badge)
         st.session_state.last_new_badge = ""
 
     sorular = st.session_state.activity.get("sorular", [])
@@ -1679,14 +1522,15 @@ elif st.session_state.phase == "questions":
     </div>
     """, unsafe_allow_html=True)
     st.markdown(f"<div class='mini-success'>{get_motivation_message('questions')}</div>", unsafe_allow_html=True)
-    render_badges()
 
-    colt1, colt2 = st.columns([3, 1])
+    colt1, colt2, colt3 = st.columns([3, 1, 1])
     with colt1:
         st.markdown("<div class='small-note'>İstersen sorularda metni buradan açıp okuyabilirsin.</div>", unsafe_allow_html=True)
     with colt2:
         if st.button("📄 Metni Göster / Gizle"):
             st.session_state.show_text_in_questions = not st.session_state.show_text_in_questions
+    with colt3:
+        render_back_button("post", "⬅️ Geri")
 
     if st.session_state.show_text_in_questions:
         with st.expander("📄 Metin", expanded=True):
@@ -1705,72 +1549,63 @@ elif st.session_state.phase == "questions":
         )
         st.markdown(f"<div style='font-size:22px; margin-bottom:14px;'>{q.get('kok','')}</div>", unsafe_allow_html=True)
 
-        for opt in opts:
-            if st.button(f"{opt}) {q.get(opt,'')}", key=f"q_{i}_{opt}"):
-                st.session_state.question_attempts[i] = st.session_state.question_attempts.get(i, 0) + 1
-                is_correct = (opt == q.get("dogru"))
-                st.session_state.correct_map[i] = 1 if is_correct else 0
+        secim = st.radio(
+            "Cevabını seç:",
+            opts,
+            format_func=lambda x: f"{x}) {q.get(x,'')}",
+            key=f"radio_q_{i}"
+        )
+
+        if st.button("Cevabı Kaydet", key=f"answer_btn_{i}"):
+            st.session_state.question_attempts[i] = int(st.session_state.question_attempts.get(i, 0)) + 1
+
+            if secim == q.get("dogru"):
+                st.session_state.correct_map[i] = 1
+                save_reading_process("QUESTION_CORRECT", f"Soru {i+1} doğru: {secim}", paragraf_no=None)
+                award_badge_for_correct_answer(i + 1)
+                st.session_state.q_idx = i + 1
+                st.rerun()
+            else:
+                st.session_state.correct_map[i] = 0
+                save_reading_process("QUESTION_WRONG", f"Soru {i+1} yanlış: {secim}", paragraf_no=None)
+                st.error("Bu cevap doğru değil. İstersen ipucu al.")
+
+        colh1, colh2 = st.columns(2)
+        with colh1:
+            if st.button("💡 İpucu Al", key=f"hint_btn_{i}"):
+                st.session_state.hints += 1
+                st.session_state.show_text_in_questions = True
+
+                next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
+                st.session_state.hint_level_by_q[i] = next_level
 
                 save_reading_process(
-                    "ANSWER",
-                    f"Soru {i+1} | secim={opt} | dogru={q.get('dogru')} | dogru_mu={is_correct} | deneme={st.session_state.question_attempts[i]}",
+                    "HINT",
+                    f"Soru {i+1} | ipucu_alindi | seviye={next_level}",
                     paragraf_no=None
                 )
 
-                if is_correct:
-                    st.success("🌟 Doğru!")
-                    st.session_state.ai_hint_text = ""
-                    if current_hint_level == 0:
-                        award_badge("🏅 Tek Atışta Doğru")
-                    else:
-                        award_badge("💡 Yardımla Başardım")
-                    st.session_state.q_idx = i + 1
-                    st.rerun()
-                else:
-                    st.error("Tekrar dene!")
-                    try:
-                        next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
-                        st.session_state.hint_level_by_q[i] = next_level
+                try:
+                    ai_hint = generate_ai_hint(metin, q, "İpucu istendi", level=next_level)
+                    st.session_state.ai_hint_text = f"(İpucu {next_level}) {ai_hint}"
+                    save_reading_process(
+                        "AI_HINT_MANUAL",
+                        f"Soru {i+1} | seviye={next_level} | {ai_hint}",
+                        paragraf_no=None
+                    )
+                    st.info(f"🤖 Chatbot ipucu: (İpucu {next_level}) {ai_hint}")
+                except Exception:
+                    st.info("📌 Metni açtım. Anahtar kelimeleri metinde ara ve ilgili bölümü tekrar oku.")
 
-                        ai_hint = generate_ai_hint(metin, q, opt, level=next_level)
-                        st.session_state.ai_hint_text = f"(İpucu {next_level}) {ai_hint}"
-
-                        save_reading_process(
-                            "AI_HINT_AUTO",
-                            f"Soru {i+1} | seviye={next_level} | {ai_hint}",
-                            paragraf_no=None
-                        )
-                    except Exception:
-                        st.session_state.ai_hint_text = "Metinde bu soruyla ilgili bölümü tekrar incele."
+        with colh2:
+            if st.button("⏭️ Bu Soruyu Geç", key=f"skip_btn_{i}"):
+                st.session_state.correct_map[i] = 0
+                save_reading_process("QUESTION_SKIPPED", f"Soru {i+1} geçildi", paragraf_no=None)
+                st.session_state.q_idx = i + 1
+                st.rerun()
 
         if st.session_state.get("ai_hint_text"):
-            st.info(f"🤖 Chatbot ipucu: {st.session_state.ai_hint_text}")
-
-        if st.button("💡 İpucu Al", key=f"hint_{i}"):
-            st.session_state.hints += 1
-            st.session_state.show_text_in_questions = True
-
-            next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
-            st.session_state.hint_level_by_q[i] = next_level
-
-            save_reading_process(
-                "HINT",
-                f"Soru {i+1} | ipucu_alindi | seviye={next_level}",
-                paragraf_no=None
-            )
-
-            try:
-                ai_hint = generate_ai_hint(metin, q, "İpucu istendi", level=next_level)
-                st.session_state.ai_hint_text = f"(İpucu {next_level}) {ai_hint}"
-                save_reading_process(
-                    "AI_HINT_MANUAL",
-                    f"Soru {i+1} | seviye={next_level} | {ai_hint}",
-                    paragraf_no=None
-                )
-                st.info(f"🤖 Chatbot ipucu: (İpucu {next_level}) {ai_hint}")
-                award_badge("💡 Akıllı Yardımcı")
-            except Exception:
-                st.info("📌 Metni açtım. Anahtar kelimeleri metinde ara ve ilgili bölümü tekrar oku.")
+            st.info(st.session_state.ai_hint_text)
 
     else:
         if not st.session_state.saved_perf:
@@ -1818,11 +1653,6 @@ elif st.session_state.phase == "questions":
 
             ok = append_row_safe("Performans", row)
             if ok:
-                if dogru == total_q and total_q > 0:
-                    award_badge("🏆 Soru Şampiyonu")
-                if st.session_state.get("hints", 0) == 0:
-                    award_badge("🌟 Gizli Güç")
-
                 st.session_state.last_report = {
                     "basari_yuzde": basari_yuzde,
                     "dogru": dogru,
@@ -1860,8 +1690,9 @@ elif st.session_state.phase == "done":
     st.balloons()
     st.success("✅ Bugünkü çalışman kaydedildi!")
     if st.session_state.get("last_new_badge"):
-        show_big_badge_popup(st.session_state.last_new_badge)
+        show_success_celebration(st.session_state.last_new_badge)
         st.session_state.last_new_badge = ""
+    st.session_state.summary_feedback_done = False
 
     st.markdown("<div class='fun-badge'>🏆 Tebrikler! Bugünkü görevi tamamladın</div>", unsafe_allow_html=True)
     st.markdown("""
@@ -1872,12 +1703,7 @@ elif st.session_state.phase == "done":
 
     rep = st.session_state.get("last_report", {}) or {}
 
-    total_badges = len(st.session_state.get("badges", []))
-    st.markdown(
-        f"<div class='mini-success'>🏅 Toplam {total_badges} rozet kazandın!</div>",
-        unsafe_allow_html=True
-    )
-    render_badges()
+    st.markdown("<div class='mini-success'>🏅 Sorularda doğru cevap verdikçe rozet kazandın.</div>", unsafe_allow_html=True)
 
     if rep:
         st.subheader("📊 Bugünkü Skor Özeti")
@@ -1929,6 +1755,9 @@ elif st.session_state.phase == "done":
             ],
         )
         st.bar_chart(df)
+        graph_png = build_report_chart_bytes(rep)
+        if graph_png:
+            st.download_button("📥 Grafik görselini indir", data=graph_png, file_name="okuma_grafigi.png", mime="image/png")
 
     st.divider()
     st.subheader("🗺️ Öykü Haritası Sonucun")
