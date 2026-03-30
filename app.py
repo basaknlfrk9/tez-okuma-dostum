@@ -11,23 +11,23 @@ from io import BytesIO
 import pandas as pd
 
 # =========================================================
-# OKUMA DOSTUM — SADE + ÖÖG UYUMLU SÜRÜM
+# OKUMA DOSTUM — ÖÖG UYUMLU TAM SÜRÜM
 # =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700;800&display=swap');
 
   html, body, [class*="css"] {
     font-family: 'Lexend', sans-serif;
     font-size: 19px;
-    background: #f7fbff;
+    background: linear-gradient(180deg, #f7fbff 0%, #fffdf7 100%);
   }
 
   .main {
-    background: #f7fbff;
+    background: linear-gradient(180deg, #f7fbff 0%, #fffdf7 100%);
   }
 
   h1, h2, h3 {
@@ -37,20 +37,60 @@ st.markdown("""
 
   .stButton button {
     width: 100%;
-    border-radius: 14px;
-    height: 2.9em;
-    font-weight: 700;
-    font-size: 16px !important;
+    border-radius: 16px;
+    height: 3em;
+    font-weight: 800;
+    font-size: 17px !important;
     border: 1px solid #2f80ed;
-    background: #2f80ed;
+    background: linear-gradient(90deg, #2f80ed 0%, #56ccf2 100%);
     color: white;
-    box-shadow: 0 4px 10px rgba(47, 128, 237, 0.15);
+    box-shadow: 0 6px 14px rgba(47, 128, 237, 0.18);
     transition: all 0.15s ease-in-out;
   }
 
   .stButton button:hover {
     transform: translateY(-1px);
     filter: brightness(1.02);
+  }
+
+  .hero-box {
+    background: linear-gradient(135deg, #fff8e8 0%, #eef7ff 100%);
+    border: 2px solid #e3eefc;
+    border-radius: 28px;
+    padding: 28px;
+    box-shadow: 0 10px 24px rgba(0,0,0,0.06);
+    margin-bottom: 18px;
+    text-align: center;
+  }
+
+  .hero-title {
+    font-size: 38px;
+    font-weight: 800;
+    color: #234;
+    margin-bottom: 10px;
+  }
+
+  .hero-sub {
+    font-size: 18px;
+    color: #4f5d6b;
+    line-height: 1.7;
+  }
+
+  .emoji-row {
+    font-size: 54px;
+    text-align: center;
+    margin-bottom: 14px;
+    letter-spacing: 8px;
+  }
+
+  .info-pill {
+    background: #ffffff;
+    border: 1px solid #ddeafb;
+    border-radius: 16px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.03);
+    font-size: 16px;
   }
 
   .highlight-box {
@@ -98,11 +138,6 @@ st.markdown("""
     border-radius: 14px;
     margin-bottom: 8px;
     border: 1px solid #ffe7ad;
-  }
-
-  .fun-badge,
-  .badge-chip {
-    display: none !important;
   }
 
   .mini-success {
@@ -220,20 +255,6 @@ def split_paragraphs(text: str, target_min=500, target_max=800, tail_min=180):
     if not text:
         return []
     return [text]
-
-def question_status_label(idx: int):
-    status = st.session_state.get("question_status", {}).get(idx, "unanswered")
-    if status == "correct":
-        return f"Soru {idx+1} ✅"
-    if status == "wrong":
-        return f"Soru {idx+1} ❌"
-    if status == "skipped":
-        return f"Soru {idx+1} ⏭️"
-    return f"Soru {idx+1}"
-
-def all_questions_finalized(total_q: int):
-    qstat = st.session_state.get("question_status", {})
-    return len(qstat) == total_q and all(v in {"correct", "wrong", "skipped"} for v in qstat.values())
 
 def build_report_chart_bytes(rep: dict):
     try:
@@ -954,6 +975,8 @@ def reset_activity_states():
     st.session_state.hint_level_by_q = {}
     st.session_state.question_attempts = {}
     st.session_state.show_text_in_questions = False
+    st.session_state.show_text_button_after_hint = False
+    st.session_state.last_question_seen = -1
     st.session_state.question_status = {}
     st.session_state.correct_map = {}
     st.session_state.skipped_questions = []
@@ -989,8 +1012,25 @@ if st.session_state.phase != "auth":
 # 1) AUTH
 # =========================================================
 if st.session_state.phase == "auth":
-    st.title("Okuma Dostum")
-    st.markdown("<div class='small-note'>Öğrenci kodunu gir, metni seç ve başla.</div>", unsafe_allow_html=True)
+    st.markdown("<div class='emoji-row'>📚 ✨ 🧠 🌈 📖</div>", unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="hero-box">
+        <div class="hero-title">Okuma Dostum</div>
+        <div class="hero-sub">
+            Birlikte okuyalım, düşünelim ve soruları çözelim.<br>
+            Hazırsan öğrenci kodunu yaz ve metnini seç.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("<div class='info-pill'>📖 Metni okuyacaksın</div>", unsafe_allow_html=True)
+        st.markdown("<div class='info-pill'>🧩 Bilmediğin kelimeyi sorabileceksin</div>", unsafe_allow_html=True)
+    with c2:
+        st.markdown("<div class='info-pill'>❓ Soruları çözeceksin</div>", unsafe_allow_html=True)
+        st.markdown("<div class='info-pill'>🗺️ Öykü haritası oluşturacaksın</div>", unsafe_allow_html=True)
 
     u = st.text_input("Öğrenci Kodun")
 
@@ -1003,35 +1043,18 @@ if st.session_state.phase == "auth":
 
     selected_id = st.selectbox("Metin seç", metin_ids_all) if metin_ids_all else st.text_input("Metin ID", "Metin_001")
 
-    if st.button("Başla") and u and selected_id:
-        st.session_state.user = u
-        st.session_state.metin_id = selected_id
-        st.session_state.session_id = str(uuid.uuid4())[:8]
-        st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
-        reset_activity_states()
-        st.session_state.phase = "setup"
-        st.rerun()
+    if st.button("Başlayalım"):
+        if not u or not selected_id:
+            st.warning("Lütfen öğrenci kodunu yaz ve bir metin seç.")
+        else:
+            st.session_state.user = u
+            st.session_state.metin_id = selected_id
+            st.session_state.session_id = str(uuid.uuid4())[:8]
+            st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
+            reset_activity_states()
 
-# =========================================================
-# 2) SETUP
-# =========================================================
-elif st.session_state.phase == "setup":
-    st.subheader("Metni Hazırla")
-
-    selected_id = st.session_state.get("metin_id", "")
-    if not selected_id:
-        st.error("Metin seçilmemiş.")
-        st.stop()
-
-    st.markdown(f"<div class='card'><b>Seçili Metin</b><br/>{selected_id}</div>", unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Metni Hazırla", disabled=st.session_state.busy):
-            st.session_state.busy = True
             activity, err = load_activity_from_bank(selected_id)
             if activity is None:
-                st.session_state.busy = False
                 st.error(f"❌ Yüklenemedi: {err}")
                 st.stop()
 
@@ -1045,14 +1068,11 @@ elif st.session_state.phase == "setup":
 
             save_reading_process("SESSION_START", f"Metin yüklendi: {selected_id}", paragraf_no=None)
 
-            st.session_state.busy = False
             st.session_state.phase = "pre"
             st.rerun()
-    with c2:
-        render_back_button("auth", "⬅️ Geri")
 
 # =========================================================
-# 3) PRE
+# 2) PRE
 # =========================================================
 elif st.session_state.phase == "pre":
     st.subheader("Okuma Öncesi")
@@ -1089,10 +1109,10 @@ elif st.session_state.phase == "pre":
                 st.session_state.phase = "during"
                 st.rerun()
     with c2:
-        render_back_button("setup", "⬅️ Geri")
+        render_back_button("auth", "⬅️ Geri")
 
 # =========================================================
-# 4) DURING
+# 3) DURING
 # =========================================================
 elif st.session_state.phase == "during":
     st.subheader("Metin")
@@ -1153,7 +1173,7 @@ elif st.session_state.phase == "during":
         st.rerun()
 
 # =========================================================
-# 5) POST
+# 4) POST
 # =========================================================
 elif st.session_state.phase == "post":
     st.subheader("Okuma Sonrası")
@@ -1274,40 +1294,12 @@ elif st.session_state.phase == "post":
         st.info(f"🤖 {st.session_state.storymap_feedback}")
 
     st.divider()
-    st.subheader("Metinle İlgili Soru Sor")
-
-    if st.session_state.get("chat_messages"):
-        for msg in st.session_state.chat_messages:
-            if msg["role"] == "user":
-                st.markdown(f"<div class='chat-user'><b>Sen:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='chat-bot'><b>Okuma Dostum:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
-
-    user_msg = st.text_input("Aklına takılan bir şeyi yaz", key="chat_input_post")
-
-    cchat1, cchat2 = st.columns(2)
-    with cchat1:
-        if st.button("Gönder", key="send_chat_post") and user_msg.strip():
-            try:
-                reply = chat_about_text(
-                    metin=metin,
-                    user_message=user_msg.strip(),
-                    chat_history=st.session_state.get("chat_messages", [])
-                )
-                st.session_state.chat_messages.append({"role": "user", "content": user_msg.strip()})
-                st.session_state.chat_messages.append({"role": "assistant", "content": reply})
-                save_reading_process("CHAT_USER", user_msg.strip(), paragraf_no=None)
-                save_reading_process("CHATBOT_REPLY", reply, paragraf_no=None)
-                st.rerun()
-            except Exception:
-                st.warning("Şu anda chatbot yanıtı üretilemedi.")
-    with cchat2:
-        if st.button("Sorulara Geç"):
-            st.session_state.phase = "questions"
-            st.rerun()
+    if st.button("Sorulara Geç"):
+        st.session_state.phase = "questions"
+        st.rerun()
 
 # =========================================================
-# 6) QUESTIONS
+# 5) QUESTIONS
 # =========================================================
 elif st.session_state.phase == "questions":
     st.subheader("Sorular")
@@ -1324,15 +1316,21 @@ elif st.session_state.phase == "questions":
 
     i = st.session_state.get("q_idx", 0)
 
-    # Her soru için metin başlangıçta kapalı olsun
     if st.session_state.get("last_question_seen") != i:
         st.session_state.show_text_in_questions = False
+        st.session_state.show_text_button_after_hint = False
         st.session_state.last_question_seen = i
         st.session_state.ai_hint_text = ""
 
     top1, top2 = st.columns([1, 5])
     with top1:
-        render_back_button("post", "⬅️ Geri")
+        if st.button("⬅️ Geri", key=f"back_question_{i}"):
+            if i > 0:
+                st.session_state.q_idx = i - 1
+                st.rerun()
+            else:
+                st.session_state.phase = "post"
+                st.rerun()
     with top2:
         st.markdown(
             f"<div class='small-note'>Soru {i+1} / {total_q}</div>",
@@ -1341,8 +1339,12 @@ elif st.session_state.phase == "questions":
 
     q = sorular[i]
 
-    # Eğer bu soru için ipucu istendiyse metin açılır
-    if st.session_state.show_text_in_questions:
+    if st.session_state.get("show_text_button_after_hint", False):
+        if st.button("📄 Metni Göster", key=f"show_text_btn_{i}"):
+            st.session_state.show_text_in_questions = True
+            st.rerun()
+
+    if st.session_state.get("show_text_in_questions", False):
         with st.expander("Metin", expanded=True):
             st.write(metin)
 
@@ -1364,7 +1366,6 @@ elif st.session_state.phase == "questions":
 
     prev_secim = st.session_state.get(prev_key)
 
-    # OTOMATİK KAYIT / OTOMATİK KONTROL
     if secim is not None and secim != prev_secim:
         st.session_state[prev_key] = secim
         st.session_state.question_attempts[i] = int(st.session_state.question_attempts.get(i, 0)) + 1
@@ -1373,6 +1374,9 @@ elif st.session_state.phase == "questions":
             st.session_state.correct_map[i] = 1
             st.session_state.question_status[i] = "correct"
             st.session_state.ai_hint_text = ""
+            st.session_state.show_text_button_after_hint = False
+            st.session_state.show_text_in_questions = False
+
             save_reading_process("QUESTION_CORRECT", f"Soru {i+1} doğru: {secim}", paragraf_no=None)
 
             if i < total_q - 1:
@@ -1390,13 +1394,19 @@ elif st.session_state.phase == "questions":
     with col1:
         if st.button("💡 İpucu", key=f"hint_btn_{i}"):
             st.session_state.hints += 1
-            st.session_state.show_text_in_questions = True
+            st.session_state.show_text_button_after_hint = True
+            st.session_state.show_text_in_questions = False
 
             next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
             st.session_state.hint_level_by_q[i] = next_level
 
             try:
-                ai_hint = generate_ai_hint(metin, q, st.session_state.get(radio_key, ""), level=next_level)
+                ai_hint = generate_ai_hint(
+                    metin,
+                    q,
+                    st.session_state.get(radio_key, "") or "",
+                    level=next_level
+                )
                 st.session_state.ai_hint_text = f"💡 İpucu: {ai_hint}"
                 save_reading_process(
                     "AI_HINT_MANUAL",
@@ -1404,7 +1414,7 @@ elif st.session_state.phase == "questions":
                     paragraf_no=None
                 )
             except Exception:
-                st.session_state.ai_hint_text = "💡 Metni tekrar oku."
+                st.session_state.ai_hint_text = "💡 İlgili bölümü tekrar düşünelim."
 
             st.rerun()
 
@@ -1412,6 +1422,9 @@ elif st.session_state.phase == "questions":
         if st.button("Soruyu Geç", key=f"skip_btn_{i}"):
             st.session_state.correct_map[i] = 0
             st.session_state.question_status[i] = "skipped"
+            st.session_state.ai_hint_text = ""
+            st.session_state.show_text_button_after_hint = False
+            st.session_state.show_text_in_questions = False
 
             if i not in st.session_state.skipped_questions:
                 st.session_state.skipped_questions.append(i)
@@ -1445,7 +1458,7 @@ elif st.session_state.phase == "questions":
                     st.rerun()
 
 # =========================================================
-# 7) FINALIZE
+# 6) FINALIZE
 # =========================================================
 elif st.session_state.phase == "finalize":
     if not st.session_state.saved_perf:
@@ -1523,7 +1536,7 @@ elif st.session_state.phase == "finalize":
             st.rerun()
 
 # =========================================================
-# 8) DONE
+# 7) DONE
 # =========================================================
 elif st.session_state.phase == "done":
     st.success("✅ Çalışma tamamlandı ve kaydedildi.")
