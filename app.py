@@ -1324,89 +1324,92 @@ elif st.session_state.phase == "questions":
 
     i = st.session_state.get("q_idx", 0)
 
+    # Her soru için metin başlangıçta kapalı olsun
+    if st.session_state.get("last_question_seen") != i:
+        st.session_state.show_text_in_questions = False
+        st.session_state.last_question_seen = i
+        st.session_state.ai_hint_text = ""
+
     top1, top2 = st.columns([1, 5])
     with top1:
         render_back_button("post", "⬅️ Geri")
     with top2:
-        if st.button("📄 Metni Göster / Gizle"):
-            st.session_state.show_text_in_questions = not st.session_state.show_text_in_questions
-
-    if st.session_state.show_text_in_questions:
-        with st.expander("Metin", expanded=True):
-            st.write(metin)
+        st.markdown(
+            f"<div class='small-note'>Soru {i+1} / {total_q}</div>",
+            unsafe_allow_html=True
+        )
 
     q = sorular[i]
 
-    st.markdown(
-        f"<div class='small-note'>Soru {i+1} / {total_q}</div>",
-        unsafe_allow_html=True
-    )
+    # Eğer bu soru için ipucu istendiyse metin açılır
+    if st.session_state.show_text_in_questions:
+        with st.expander("Metin", expanded=True):
+            st.write(metin)
 
     st.markdown(
         f"<div class='card'><b>{q.get('kok','')}</b></div>",
         unsafe_allow_html=True
     )
 
+    radio_key = f"radio_q_{i}"
+    prev_key = f"{radio_key}_prev"
+
     secim = st.radio(
         "Cevabını seç",
         opts,
         index=None,
         format_func=lambda x: f"{x}) {q.get(x,'')}",
-        key=f"radio_q_{i}"
+        key=radio_key
     )
+
+    prev_secim = st.session_state.get(prev_key)
+
+    # OTOMATİK KAYIT / OTOMATİK KONTROL
+    if secim is not None and secim != prev_secim:
+        st.session_state[prev_key] = secim
+        st.session_state.question_attempts[i] = int(st.session_state.question_attempts.get(i, 0)) + 1
+
+        if secim == q.get("dogru"):
+            st.session_state.correct_map[i] = 1
+            st.session_state.question_status[i] = "correct"
+            st.session_state.ai_hint_text = ""
+            save_reading_process("QUESTION_CORRECT", f"Soru {i+1} doğru: {secim}", paragraf_no=None)
+
+            if i < total_q - 1:
+                st.session_state.q_idx = i + 1
+                st.rerun()
+            else:
+                st.success("Tüm sorular bitti.")
+        else:
+            st.session_state.correct_map[i] = 0
+            st.session_state.question_status[i] = "wrong"
+            save_reading_process("QUESTION_WRONG", f"Soru {i+1} yanlış: {secim}", paragraf_no=None)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Cevabı Kaydet", key=f"answer_btn_{i}"):
+        if st.button("💡 İpucu", key=f"hint_btn_{i}"):
+            st.session_state.hints += 1
+            st.session_state.show_text_in_questions = True
 
-            if secim is None:
-                st.warning("Lütfen bir seçenek işaretle.")
-                st.stop()
+            next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
+            st.session_state.hint_level_by_q[i] = next_level
 
-            st.session_state.question_attempts[i] = int(st.session_state.question_attempts.get(i, 0)) + 1
+            try:
+                ai_hint = generate_ai_hint(metin, q, st.session_state.get(radio_key, ""), level=next_level)
+                st.session_state.ai_hint_text = f"💡 İpucu: {ai_hint}"
+                save_reading_process(
+                    "AI_HINT_MANUAL",
+                    f"Soru {i+1} | seviye={next_level} | {ai_hint}",
+                    paragraf_no=None
+                )
+            except Exception:
+                st.session_state.ai_hint_text = "💡 Metni tekrar oku."
 
-            if secim == q.get("dogru"):
-                st.session_state.correct_map[i] = 1
-                st.session_state.question_status[i] = "correct"
-                st.session_state.ai_hint_text = ""
-
-                save_reading_process("QUESTION_CORRECT", f"Soru {i+1} doğru: {secim}", paragraf_no=None)
-
-                if i < total_q - 1:
-                    st.session_state.q_idx = i + 1
-                    st.rerun()
-                else:
-                    st.success("Tüm sorular bitti.")
-
-            else:
-                st.session_state.correct_map[i] = 0
-                st.session_state.question_status[i] = "wrong"
-
-                save_reading_process("QUESTION_WRONG", f"Soru {i+1} yanlış: {secim}", paragraf_no=None)
-
-                st.session_state.hints += 1
-                st.session_state.show_text_in_questions = True
-
-                next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
-                st.session_state.hint_level_by_q[i] = next_level
-
-                try:
-                    ai_hint = generate_ai_hint(metin, q, secim, level=next_level)
-                    st.session_state.ai_hint_text = f"💡 İpucu: {ai_hint}"
-                    save_reading_process(
-                        "AI_HINT_AUTO",
-                        f"Soru {i+1} | seviye={next_level} | {ai_hint}",
-                        paragraf_no=None
-                    )
-                except Exception:
-                    st.session_state.ai_hint_text = "💡 Metni tekrar oku."
-
-                st.rerun()
+            st.rerun()
 
     with col2:
         if st.button("Soruyu Geç", key=f"skip_btn_{i}"):
-
             st.session_state.correct_map[i] = 0
             st.session_state.question_status[i] = "skipped"
 
@@ -1428,7 +1431,7 @@ elif st.session_state.phase == "questions":
 
     with alt1:
         if i < total_q - 1:
-            if st.button("Sonraki ➡️"):
+            if st.button("Sonraki ➡️", key=f"next_q_{i}"):
                 st.session_state.q_idx += 1
                 st.rerun()
 
