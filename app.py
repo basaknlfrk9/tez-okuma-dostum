@@ -1,216 +1,1620 @@
 import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from openai import OpenAI
-import json, time, random
-from io import BytesIO
+from openai import RateLimitError, APIError, APITimeoutError
+import json, uuid, time, re, random, traceback
 from gtts import gTTS
+from io import BytesIO
+import pandas as pd
+
+# =========================================================
+# OKUMA DOSTUM — SADE + ÖÖG UYUMLU SÜRÜM
+# =========================================================
 
 st.set_page_config(page_title="Okuma Dostum", layout="wide")
 
-# =========================
-# STYLE (SADE)
-# =========================
 st.markdown("""
 <style>
-html, body {font-size:18px;}
-.stButton button {
-    height:2.8em;
-    border-radius:12px;
-    font-weight:700;
-}
-.card {
-    background:#fff;
-    padding:15px;
-    border-radius:12px;
-    margin-bottom:10px;
-}
-.highlight {
-    background:#fff8e1;
-    padding:20px;
-    border-radius:15px;
-    font-size:20px;
-}
+  @import url('https://fonts.googleapis.com/css2?family=Lexend:wght@400;600;700&display=swap');
+
+  html, body, [class*="css"] {
+    font-family: 'Lexend', sans-serif;
+    font-size: 19px;
+    background: #f7fbff;
+  }
+
+  .main {
+    background: #f7fbff;
+  }
+
+  h1, h2, h3 {
+    color: #243447;
+    letter-spacing: 0.2px;
+  }
+
+  .stButton button {
+    width: 100%;
+    border-radius: 14px;
+    height: 2.9em;
+    font-weight: 700;
+    font-size: 16px !important;
+    border: 1px solid #2f80ed;
+    background: #2f80ed;
+    color: white;
+    box-shadow: 0 4px 10px rgba(47, 128, 237, 0.15);
+    transition: all 0.15s ease-in-out;
+  }
+
+  .stButton button:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.02);
+  }
+
+  .highlight-box {
+    background: #ffffff;
+    padding: 22px;
+    border-radius: 18px;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.05);
+    border-left: 8px solid #ffd54f;
+    font-size: 22px !important;
+    line-height: 1.9 !important;
+    margin-bottom: 16px;
+    white-space: pre-wrap;
+  }
+
+  .small-note {
+    color: #4f5d6b;
+    font-size: 15px;
+    background: #eef5ff;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid #d8e8ff;
+    margin-bottom: 8px;
+  }
+
+  .card {
+    background: #ffffff;
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid #e7eef7;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+  }
+
+  .chat-user {
+    background: #edf6ff;
+    padding: 12px;
+    border-radius: 14px;
+    margin-bottom: 8px;
+    border: 1px solid #d9ebff;
+  }
+
+  .chat-bot {
+    background: #fff8e8;
+    padding: 12px;
+    border-radius: 14px;
+    margin-bottom: 8px;
+    border: 1px solid #ffe7ad;
+  }
+
+  .fun-badge,
+  .badge-chip {
+    display: none !important;
+  }
+
+  .mini-success {
+    background: #eaf7ee;
+    color: #245c36;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 600;
+    margin: 8px 0 12px 0;
+  }
+
+  .mini-progress {
+    background: #edf4ff;
+    border-radius: 14px;
+    overflow: hidden;
+    height: 12px;
+    margin: 8px 0 16px 0;
+    border: 1px solid #dbe8ff;
+  }
+
+  .mini-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #6fcf97 0%, #2f80ed 100%);
+    border-radius: 14px;
+  }
+
+  div[data-testid="stTextInput"] input,
+  div[data-testid="stTextArea"] textarea {
+    border-radius: 14px !important;
+    border: 2px solid #dfe8f3 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    font-size: 17px !important;
+  }
+
+  div[data-testid="stTextInput"] input:focus,
+  div[data-testid="stTextArea"] textarea:focus {
+    border: 2px solid #9ecbff !important;
+    box-shadow: 0 0 0 2px rgba(158, 203, 255, 0.18) !important;
+  }
+
+  div[data-testid="stRadio"] label,
+  div[data-testid="stCheckbox"] label {
+    font-size: 17px !important;
+  }
+
+  .stAlert {
+    border-radius: 14px !important;
+  }
+
+  section[data-testid="stSidebar"] {
+    display: none !important;
+  }
 </style>
 """, unsafe_allow_html=True)
 
+# =========================================================
+# HELPERS
+# =========================================================
+def _norm(x) -> str:
+    return str(x or "").strip()
+
+def now_tr() -> str:
+    return datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M:%S")
+
+def go_to_phase(target_phase: str):
+    st.session_state.phase = target_phase
+    st.rerun()
+
+def render_back_button(target_phase: str, label: str = "⬅️ Geri"):
+    if st.button(label, key=f"back_{target_phase}_{st.session_state.get('phase','')}"):
+        go_to_phase(target_phase)
+
+def maybe_log_once(key: str, kayit_turu: str, value: str, paragraf_no=None):
+    value = str(value or "").strip()
+    cache = st.session_state.get("autosave_cache", {}) or {}
+    if cache.get(key) != value:
+        cache[key] = value
+        st.session_state.autosave_cache = cache
+        save_reading_process(kayit_turu, value if value else "(boş)", paragraf_no=paragraf_no)
+
+def extract_metin_number(metin_id: str) -> int:
+    s = _norm(metin_id)
+    m = re.search(r"(\d+)", s)
+    if not m:
+        return 0
+    try:
+        return int(m.group(1))
+    except Exception:
+        return 0
+
+def expected_question_count(metin_id: str) -> int:
+    n = extract_metin_number(metin_id)
+    return 7 if n >= 8 else 6
+
+def option_letters_for_metin(metin_id: str):
+    n = extract_metin_number(metin_id)
+    return ["A", "B", "C"] if (n and n < 5) else ["A", "B", "C", "D"]
+
+def get_audio(text: str):
+    clean = re.sub(r"[*#_]", "", (text or ""))[:1000]
+    try:
+        tts = gTTS(text=clean, lang="tr")
+        fp = BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        return fp
+    except Exception:
+        st.error("❌ Ses oluşturulamadı. Lütfen tekrar deneyin.")
+        return None
+
+def split_paragraphs(text: str, target_min=500, target_max=800, tail_min=180):
+    text = (text or "").strip()
+    if not text:
+        return []
+    return [text]
+
+def question_status_label(idx: int):
+    status = st.session_state.get("question_status", {}).get(idx, "unanswered")
+    if status == "correct":
+        return f"Soru {idx+1} ✅"
+    if status == "wrong":
+        return f"Soru {idx+1} ❌"
+    if status == "skipped":
+        return f"Soru {idx+1} ⏭️"
+    return f"Soru {idx+1}"
+
+def all_questions_finalized(total_q: int):
+    qstat = st.session_state.get("question_status", {})
+    return len(qstat) == total_q and all(v in {"correct", "wrong", "skipped"} for v in qstat.values())
+
+def build_report_chart_bytes(rep: dict):
+    try:
+        import matplotlib.pyplot as plt
+        labels = ["Süre", "Doğru", "Yanlış", "Geçilen", "İpucu", "Dinleme", "Tekrar"]
+        values = [
+            float(rep.get("sure_dk", 0)),
+            int(rep.get("dogru", 0)),
+            int(rep.get("yanlis", 0)),
+            int(rep.get("gecilen", 0)),
+            int(rep.get("hints", 0)),
+            int(rep.get("tts_count", 0)),
+            int(rep.get("reread_count", 0)),
+        ]
+        fig, ax = plt.subplots(figsize=(10, 4.8))
+        ax.bar(labels, values)
+        ax.set_title("Bugünkü Okuma Özeti")
+        fig.tight_layout()
+        buf = BytesIO()
+        fig.savefig(buf, format="png", dpi=180, bbox_inches="tight")
+        plt.close(fig)
+        buf.seek(0)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+def build_report_text(rep: dict, story_total, story_reason):
+    lines = [
+        "OKUMA DOSTUM RAPORU",
+        f"Tarih: {now_tr()}",
+        f"Öğrenci: {st.session_state.get('user','')}",
+        f"Metin ID: {st.session_state.get('metin_id','')}",
+        "",
+        f"Başarı: {rep.get('basari_yuzde','')}",
+        f"Doğru: {rep.get('dogru',0)} / {rep.get('total_q',0)}",
+        f"Yanlış: {rep.get('yanlis',0)}",
+        f"Geçilen: {rep.get('gecilen',0)}",
+        f"Süre (dk): {rep.get('sure_dk',0)}",
+        f"İpucu: {rep.get('hints',0)}",
+        f"Dinleme: {rep.get('tts_count',0)}",
+        f"Tekrar Okuma: {rep.get('reread_count',0)}",
+        "",
+        f"Tahmin: {rep.get('prediction','')}",
+        f"Okuma Hızı: {rep.get('speed','')}",
+        f"En Önemli Şey: {rep.get('important_note','')}",
+        f"Ön Bilgi: {rep.get('prior_knowledge','')}",
+        f"Özet: {rep.get('summary','')}",
+        "",
+        f"Öykü Haritası Puanı: {story_total if story_total is not None else ''}",
+        f"Öykü Haritası Gerekçe: {story_reason or ''}",
+    ]
+    return "\n".join(lines)
+
+# =========================================================
+# OPENAI
+# =========================================================
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# =========================
-# 🔥 ÖÖG UYUMLU PROMPTLAR
-# =========================
+def openai_json_request(system_prompt, user_text, model="gpt-4o-mini", max_retries=6, temperature=0):
+    for attempt in range(max_retries):
+        try:
+            return client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_text},
+                ],
+                response_format={"type": "json_object"},
+                temperature=temperature,
+            )
+        except (RateLimitError, APIError, APITimeoutError):
+            wait = min(2 ** attempt, 20) + random.uniform(0, 1.0)
+            st.warning(f"⚠️ Yoğunluk var, tekrar deneniyor... ({attempt+1}/{max_retries})")
+            time.sleep(wait)
+    st.error("❌ OpenAI yoğunluğu çok fazla. Biraz sonra tekrar deneyin.")
+    st.stop()
 
-def generate_ai_hint(metin, soru, secim, level=1):
+def openai_text_request(system_prompt, user_text, model="gpt-4o-mini", max_retries=6, temperature=0.3):
+    for attempt in range(max_retries):
+        try:
+            return client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_text},
+                ],
+                temperature=temperature,
+            )
+        except (RateLimitError, APIError, APITimeoutError):
+            wait = min(2 ** attempt, 20) + random.uniform(0, 1.0)
+            st.warning(f"⚠️ Yoğunluk var, tekrar deneniyor... ({attempt+1}/{max_retries})")
+            time.sleep(wait)
+    st.error("❌ OpenAI yoğunluğu çok fazla. Biraz sonra tekrar deneyin.")
+    st.stop()
 
-    system_prompt = """
-Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine yardım eden bir öğretmensin.
+def transcribe_audio_bytes(audio_bytes: bytes) -> str:
+    if not audio_bytes:
+        return ""
+    try:
+        bio = BytesIO(audio_bytes)
+        bio.name = "speech.wav"
+        resp = client.audio.transcriptions.create(
+            model="gpt-4o-mini-transcribe",
+            file=bio
+        )
+        return (getattr(resp, "text", "") or "").strip()
+    except Exception:
+        try:
+            bio = BytesIO(audio_bytes)
+            bio.name = "speech.wav"
+            resp = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=bio
+            )
+            return (getattr(resp, "text", "") or "").strip()
+        except Exception:
+            return ""
+
+# =========================================================
+# CHATBOT / FEEDBACK
+# =========================================================
+def generate_ai_hint(metin: str, soru: dict, wrong_choice: str, level: int = 1):
+    opts_payload = {}
+    for k in ["A", "B", "C", "D"]:
+        if soru.get(k):
+            opts_payload[k] = soru.get(k)
+
+    if level == 1:
+        level_instruction = """
+- Çok kısa ve genel bir ipucu ver.
+- Öğrenciyi metindeki ilgili bölüme yönlendir.
+- Cevabı söyleme.
+"""
+    elif level == 2:
+        level_instruction = """
+- Biraz daha açık ipucu ver.
+- Yine cevabı söyleme.
+- Dikkat etmesi gereken kelime ya da cümleyi sezdir.
+"""
+    else:
+        level_instruction = """
+- En açık ipucunu ver.
+- Ama doğru seçeneği doğrudan söyleme.
+- Öğrenciyi cevaba çok yaklaştır.
+"""
+
+    sys = f"""
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan sabırlı bir okuma öğretmenisin.
 
 Kurallar:
-- Çok basit konuş
-- En fazla 2 cümle yaz
-- Cevabı ASLA söyleme
-- Öğrenciyi metne yönlendir
-- Motive edici ol
+- Türkçe yaz.
+- Kısa yaz.
+- En fazla 2 kısa cümle kullan.
+- Zor kelime kullanma.
+- Karmaşık cümle kurma.
+- Cevabı doğrudan verme.
+- Öğrenciyi korkutma, yargılama.
+- Nazik ve destekleyici ol.
+- Metindeki ilgili yere yönlendir.
+{level_instruction}
 """
+    payload = {
+        "metin": (metin or "")[:2500],
+        "soru": soru.get("kok", ""),
+        "seçenekler": opts_payload,
+        "ogrencinin_secimi": wrong_choice,
+        "dogru_cevap": soru.get("dogru", ""),
+        "ipucu_seviyesi": level
+    }
+    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.2)
+    return resp.choices[0].message.content.strip()
 
-    user_prompt = f"""
-Metin: {metin[:1000]}
+def generate_summary_feedback(metin: str, ozet: str):
+    sys = """
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan bir öğretmensin.
 
-Soru: {soru['kok']}
-Öğrencinin seçimi: {secim}
-
-İpucu ver.
+Kurallar:
+- Türkçe yaz.
+- Çok kısa yaz.
+- En fazla 3 kısa cümle yaz.
+- Önce öğrencinin iyi yaptığı bir şeyi söyle.
+- Sonra sadece 1 küçük geliştirme önerisi ver.
+- Sade ve anlaşılır kelimeler kullan.
+- Nazik ve destekleyici ol.
 """
+    payload = {
+        "metin": (metin or "")[:2500],
+        "ogrenci_ozeti": (ozet or "")[:1000]
+    }
+    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.3)
+    return resp.choices[0].message.content.strip()
+
+def generate_storymap_feedback(metin: str, sm: dict):
+    sys = """
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan bir öğretmensin.
+
+Kurallar:
+- Türkçe yaz.
+- Çok kısa yaz.
+- En fazla 3 kısa cümle kullan.
+- Öğrencinin doğru yaptığı bir şeyi söyle.
+- Sonra sadece 1 kısa öneri ver.
+- Cevabı doğrudan verme.
+- Nazik ve motive edici ol.
+"""
+    payload = {
+        "metin": (metin or "")[:2500],
+        "story_map": sm
+    }
+    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.3)
+    return resp.choices[0].message.content.strip()
+
+def explain_word_simple(word: str, metin: str):
+    sys = """
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine kelime açıklayan sabırlı bir öğretmensin.
+
+Kurallar:
+- Türkçe yaz.
+- Çok basit anlat.
+- En fazla 2 kısa cümle kullan.
+- Zor kelime kullanma.
+- Gerekirse metindeki anlama göre açıkla.
+- Kısa ve net ol.
+"""
+    payload = {
+        "kelime": word,
+        "metin": (metin or "")[:1200]
+    }
+    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.2)
+    return resp.choices[0].message.content.strip()
+
+def chat_about_text(metin: str, user_message: str, chat_history=None):
+    history = chat_history or []
+
+    messages = [
+        {
+            "role": "system",
+            "content": """
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine metin okuma desteği veren bir eğitim chatbotusun.
+
+Görevin:
+- Öğrencinin metni daha iyi anlamasına yardım etmek
+- Kısa, açık ve sade cevap vermek
+- Öğrenciyi korkutmadan, sabırlı şekilde yönlendirmek
+
+Kurallar:
+- Türkçe yaz.
+- Kısa yaz.
+- En fazla 2-3 kısa cümle kullan.
+- Zor kelime kullanma.
+- Uzun açıklama yapma.
+- Bir anda çok fazla bilgi verme.
+- Cevabı hemen söylemek yerine öğrenciyi düşünmeye yönlendir.
+- Gerekirse metindeki ilgili bölümü hatırlat.
+- Yargılayıcı olma.
+- Nazik ve motive edici ol.
+- Metin dışına çıkma.
+- Öğrenci bir kelime sorarsa çok basit şekilde açıkla.
+- Öğrenci kafası karışmışsa adım adım yardımcı ol.
+- Gerekirse "Beraber düşünelim." gibi destekleyici ifadeler kullan.
+"""
+        }
+    ]
+
+    for item in history[-6:]:
+        messages.append({"role": item["role"], "content": item["content"]})
+
+    messages.append({
+        "role": "user",
+        "content": f"""METİN:
+{(metin or '')[:3000]}
+
+ÖĞRENCİ MESAJI:
+{user_message}
+
+Bu öğrenci özel öğrenme güçlüğü yaşayan bir ortaokul öğrencisi olabilir.
+Bu yüzden cevabını sade, kısa ve anlaşılır kur."""
+    })
 
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {"role":"system","content":system_prompt},
-            {"role":"user","content":user_prompt}
-        ]
+        messages=messages,
+        temperature=0.3,
     )
+    return resp.choices[0].message.content.strip()
 
-    return resp.choices[0].message.content
+# =========================================================
+# GOOGLE SHEETS
+# =========================================================
+@st.cache_resource
+def get_gs_client():
+    info = dict(st.secrets["GSHEETS"])
+    pk = info.get("private_key", "")
+    if isinstance(pk, str) and "\\n" in pk:
+        info["private_key"] = pk.replace("\\n", "\n")
 
+    creds = Credentials.from_service_account_info(
+        info,
+        scopes=[
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ],
+    )
+    return gspread.authorize(creds)
 
-def explain_word(word):
+@st.cache_resource
+def get_spreadsheet():
+    return get_gs_client().open_by_url(st.secrets["GSHEET_URL"])
 
-    system_prompt = """
-Sen çocuklara kelime öğreten bir öğretmensin.
+def get_ws(sheet_name: str):
+    sh = get_spreadsheet()
+    wanted = sheet_name.strip().lower()
+    for w in sh.worksheets():
+        if w.title.strip().lower() == wanted:
+            return w
+    raise ValueError(f"Sheet sekmesi bulunamadı: '{sheet_name}'.")
 
-Kurallar:
-- Çok basit anlat
-- 1-2 cümle
-- Örnek ver
+@st.cache_data(ttl=300)
+def read_sheet_records(sheet_name: str):
+    ws = get_ws(sheet_name)
+    return ws.get_all_records()
+
+def append_row_safe(sheet_name: str, row):
+    try:
+        ws = get_ws(sheet_name)
+        ws.append_row(row, value_input_option="USER_ENTERED")
+        return True
+    except Exception:
+        st.error(f"❌ Sheets yazma hatası ({sheet_name})")
+        st.code(traceback.format_exc())
+        return False
+
+# =========================================================
+# LOG
+# =========================================================
+def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
+    row = [
+        st.session_state.get("session_id", ""),
+        st.session_state.get("user", ""),
+        now_tr(),
+        "",
+        st.session_state.get("metin_id", ""),
+        paragraf_no if paragraf_no is not None else "",
+        kayit_turu,
+        (icerik or "")[:45000],
+    ]
+    append_row_safe("OkumaSüreci", row)
+
+# =========================================================
+# ÜSTBİLİŞSEL RUBRİK
+# =========================================================
+def compute_metacog_signals():
+    qa = st.session_state.get("question_attempts", {}) or {}
+    try:
+        attempts_total = sum(int(v) for v in qa.values())
+    except Exception:
+        attempts_total = 0
+
+    return {
+        "prediction_len": len((st.session_state.get("prediction") or "").strip()),
+        "attention_ok": False,
+        "speed": st.session_state.get("reading_speed", ""),
+        "repeat_count": int(st.session_state.get("repeat_count", 0)),
+        "tts_count": int(st.session_state.get("tts_count", 0)),
+        "reread_count": int(st.session_state.get("reread_count", 0)),
+        "hints": int(st.session_state.get("hints", 0)),
+        "attempts_total": int(attempts_total),
+        "summary_len": len((st.session_state.get("summary") or "").strip()),
+        "important_note_len": len((st.session_state.get("final_important_note") or "").strip()),
+        "prior_knowledge_len": len((st.session_state.get("prior_knowledge") or "").strip()),
+        "story_map_total": int(st.session_state.get("story_map_last_total") or 0),
+        "story_map_filled": int(st.session_state.get("story_map_filled") or 0),
+        "reflection_strategy_len": len((st.session_state.get("reflection_strategy") or "").strip()),
+        "reflection_next_len": len((st.session_state.get("reflection_next_time") or "").strip()),
+    }
+
+def rule_based_metacog_score(sig):
+    plan = 1 if sig["prediction_len"] >= 5 else 0
+
+    monitor = 0
+    if (sig["reread_count"] + sig["tts_count"]) >= 1:
+        monitor += 1
+    if sig["hints"] >= 1:
+        monitor += 1
+    if sig["attempts_total"] >= 2:
+        monitor += 1
+    monitor = min(monitor, 3)
+
+    evals = 0
+    if sig["summary_len"] >= 20:
+        evals += 1
+    if sig["important_note_len"] >= 10:
+        evals += 1
+    if sig["story_map_total"] >= 6 or sig["story_map_filled"] >= 4:
+        evals += 1
+    evals = min(evals, 3)
+
+    transfer = 0
+    if sig["reflection_next_len"] >= 8:
+        transfer = 1
+    if sig["reflection_next_len"] >= 20:
+        transfer = 2
+
+    total = plan + monitor + evals + transfer
+    reason = "Kural tabanlı rubrik."
+    return {"planlama": plan, "izleme": monitor, "degerlendirme": evals, "transfer": transfer, "total": total, "reason": reason}
+
+def save_metacog_rubric_row(scores: dict, reason: str, signals: dict):
+    row = [
+        st.session_state.get("session_id", ""),
+        st.session_state.get("user", ""),
+        now_tr(),
+        st.session_state.get("metin_id", ""),
+        int(scores.get("planlama", 0)),
+        int(scores.get("izleme", 0)),
+        int(scores.get("degerlendirme", 0)),
+        int(scores.get("transfer", 0)),
+        int(scores.get("total", 0)),
+        (reason or "")[:500],
+        json.dumps(signals, ensure_ascii=False)[:45000],
+    ]
+    return append_row_safe("UstBilisselRubrik", row)
+
+# =========================================================
+# BANKA
+# =========================================================
+def list_metin_ids():
+    rows = read_sheet_records("MetinBankasi")
+    ids = []
+    for r in rows:
+        if _norm(r.get("metin_id")):
+            ids.append(_norm(r.get("metin_id")))
+    return sorted(list(set(ids)))
+
+def load_activity_from_bank(metin_id: str):
+    mrows = read_sheet_records("MetinBankasi")
+
+    def normrow(r: dict):
+        return {str(k).strip().lower(): ("" if r.get(k) is None else str(r.get(k)).strip()) for k in r.keys()}
+
+    mrows_n = [normrow(r) for r in mrows]
+    match_m = [r for r in mrows_n if _norm(r.get("metin_id")) == _norm(metin_id)]
+    if not match_m:
+        return None, "MetinBankasi'nda bu metin_id bulunamadı."
+
+    metin = _norm(match_m[0].get("metin"))
+    baslik = _norm(match_m[0].get("baslik"))
+    pre_ipucu = _norm(match_m[0].get("pre_ipucu"))
+
+    if not metin:
+        return None, "MetinBankasi'nda metin alanı boş."
+
+    qrows = read_sheet_records("SoruBankasi")
+    qrows_n = [normrow(r) for r in qrows]
+    match_q = [r for r in qrows_n if _norm(r.get("metin_id")) == _norm(metin_id)]
+    if not match_q:
+        return None, "SoruBankasi'nda bu metin_id için soru bulunamadı."
+
+    def qno(r):
+        s = str(r.get("soru_no", "")).strip()
+        m = re.search(r"(\d+)", s)
+        return int(m.group(1)) if m else 0
+
+    match_q = sorted(match_q, key=qno)
+    opts = option_letters_for_metin(metin_id)
+
+    def get_opt(r, L):
+        for c in [L.lower(), L.lower().strip(), L.strip().lower()]:
+            v = r.get(c)
+            if v is not None and str(v).strip():
+                return _norm(v)
+        return ""
+
+    sorular = []
+    for r in match_q:
+        kok = _norm(r.get("kok")) or "(Soru kökü eksik)"
+        dogru = _norm(r.get("dogru")).upper() or opts[0]
+        if dogru not in opts:
+            dogru = opts[0]
+        q_obj = {"kok": kok, "dogru": dogru}
+        for L in opts:
+            q_obj[L] = get_opt(r, L)
+        sorular.append(q_obj)
+
+    exp_n = expected_question_count(metin_id)
+    if len(sorular) != exp_n:
+        diag = f"Bulunan soru={len(sorular)} / Beklenen={exp_n}."
+        return None, diag
+
+    return {"sade_metin": metin, "baslik": baslik, "pre_ipucu": pre_ipucu, "sorular": sorular, "opts": opts}, ""
+
+# =========================================================
+# STORY MAP AI
+# =========================================================
+def _tr_lower_story(s: str) -> str:
+    s = str(s or "")
+    repl = str.maketrans({"I": "ı", "İ": "i", "Ş": "ş", "Ğ": "ğ", "Ü": "ü", "Ö": "ö", "Ç": "ç"})
+    return s.translate(repl).lower()
+
+def _normalize_story_text(s: str) -> str:
+    s = _tr_lower_story(s)
+    s = re.sub(r"[^\w\s]", " ", s, flags=re.UNICODE)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _story_replace_synonyms(s: str) -> str:
+    s = " " + _normalize_story_text(s) + " "
+    synonym_map = {
+        "yuva": ["ev", "evi", "barinak", "barınağı", "barinagi"],
+        "yikildi": ["bozuldu", "zarar gordu", "zarar gördü", "dagildi", "dağıldı", "coktu", "çöktü"],
+        "kus": ["kuş", "yavru kus", "yavru kuş", "kucuk kus", "küçük kuş"],
+        "uzuldu": ["uzgun", "üzgün", "cok uzuldu", "çok üzüldü"],
+        "yardim": ["destek", "yardim etti", "yardım etti", "yardimci oldu", "yardımcı oldu"],
+        "orman": ["agaclik", "ağaçlık", "agac", "ağaç"],
+        "sabah": ["gunduz", "gündüz", "erken", "sabah vakti"],
+        "cozum": ["sonuc", "sonuç", "care", "çare"],
+        "mutlu": ["sevindi", "sevincli", "sevinçli", "mutluydu"],
+        "korktu": ["ürktü", "urktu", "endiselendi", "endişelendi"],
+        "arkadas": ["dost", "arkadaşı", "arkadasi"],
+    }
+    for canon, variants in synonym_map.items():
+        for v in variants:
+            s = s.replace(f" {v} ", f" {canon} ")
+    return re.sub(r"\s+", " ", s).strip()
+
+def _find_best_evidence_span(metin: str, answer: str, max_words: int = 16) -> str:
+    metin = str(metin or "")
+    answer = str(answer or "").strip()
+    if not metin or not answer:
+        return ""
+    ans_norm = _story_replace_synonyms(answer)
+    ans_tokens = set(ans_norm.split())
+    if not ans_tokens:
+        return ""
+    sentences = re.split(r"(?<=[.!?…])\s+|\n+", metin)
+    best_sent = ""
+    best_score = 0.0
+    for sent in sentences:
+        sent_norm = _story_replace_synonyms(sent)
+        sent_tokens = set(sent_norm.split())
+        if not sent_tokens:
+            continue
+        overlap = ans_tokens & sent_tokens
+        coverage = len(overlap) / max(len(ans_tokens), 1)
+        substring_bonus = 0.35 if ans_norm in sent_norm else 0
+        score = coverage + substring_bonus
+        if score > best_score:
+            best_score = score
+            best_sent = sent.strip()
+    if best_score <= 0:
+        return ""
+    words = best_sent.split()
+    return best_sent if len(words) <= max_words else " ".join(words[:max_words])
+
+def _score_single_story_field_rule(answer: str, metin: str, field_name: str = ""):
+    answer = str(answer or "").strip()
+    if not answer:
+        return 0, "", "Boş cevap"
+
+    raw_answer_norm = _normalize_story_text(answer)
+    smart_answer_norm = _story_replace_synonyms(answer)
+    ans_tokens = set(smart_answer_norm.split())
+    if not ans_tokens:
+        return 0, "", "Anlamlı kelime yok"
+
+    raw_metin_norm = _normalize_story_text(metin)
+    smart_metin_norm = _story_replace_synonyms(metin)
+    evidence = _find_best_evidence_span(metin, answer)
+
+    if raw_answer_norm and raw_answer_norm in raw_metin_norm:
+        return 2, evidence or answer, "Metinde doğrudan geçti"
+    if smart_answer_norm and smart_answer_norm in smart_metin_norm:
+        return 2, evidence or answer, "Eşdeğer anlamla metinde geçti"
+
+    metin_tokens = set(smart_metin_norm.split())
+    overlap = ans_tokens & metin_tokens
+    coverage = len(overlap) / max(len(ans_tokens), 1)
+
+    if len(ans_tokens) == 1 and len(overlap) == 1:
+        return 2, evidence or answer, "Tek kelimelik güçlü eşleşme"
+
+    if field_name in {"problem", "olaylar", "cozum"}:
+        if coverage >= 0.60:
+            return 2, evidence or answer, "Anlamsal güçlü eşleşme"
+        elif coverage >= 0.30:
+            return 1, evidence or answer, "Anlamsal kısmi eşleşme"
+        else:
+            return 0, "", "Eşleşme zayıf"
+
+    if coverage >= 0.80:
+        return 2, evidence or answer, "Güçlü kelime eşleşmesi"
+    elif coverage >= 0.40:
+        return 1, evidence or answer, "Kısmi kelime eşleşmesi"
+    else:
+        return 0, "", "Kelime eşleşmesi zayıf"
+
+def _llm_semantic_score(field_name: str, answer: str, metin: str):
+    answer = str(answer or "").strip()
+    if not answer:
+        return 0, "", "Boş cevap"
+
+    sys = f"""
+Sen özel öğrenme güçlüğü yaşayan öğrencilerin öykü haritası cevaplarını dikkatli değerlendiren bir öğretmensin.
+
+Alan: {field_name}
+
+0 puan: yanlış / alakasız
+1 puan: kısmen doğru
+2 puan: doğru veya kabul edilebilir eş anlamlı
+
+Sadece JSON üret:
+{{"score":0,"evidence":"","reason":""}}
 """
+    user = json.dumps({"alan": field_name, "ogrenci_cevabi": answer, "metin": (metin or "")[:5000]}, ensure_ascii=False)
+    try:
+        resp = openai_json_request(sys, user, model="gpt-4o-mini", temperature=0)
+        data = json.loads(resp.choices[0].message.content)
+        score = max(0, min(2, int(data.get("score", 0))))
+        evidence = str(data.get("evidence", "") or "").strip()[:180]
+        reason = str(data.get("reason", "") or "").strip()[:160]
+        return score, evidence, reason
+    except Exception:
+        return 0, "", "LLM puanı alınamadı"
 
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role":"system","content":system_prompt},
-            {"role":"user","content":f"{word} kelimesini açıkla"}
-        ]
-    )
+def ai_score_story_map(metin: str, sm: dict):
+    alanlar = ["kahraman", "mekan", "zaman", "problem", "olaylar", "cozum"]
+    kural_agirlikli = {"kahraman", "mekan", "zaman"}
+    out, reasons = {}, {}
 
-    return resp.choices[0].message.content
+    for key in alanlar:
+        answer = sm.get(key, "")
+        rule_score, _, rule_reason = _score_single_story_field_rule(answer, metin, key)
 
+        if key in kural_agirlikli:
+            out[key] = int(rule_score)
+            reasons[key] = rule_reason
+            continue
 
-# =========================
+        if not str(answer or "").strip():
+            out[key] = 0
+            reasons[key] = "Boş cevap"
+            continue
+
+        llm_score, _, llm_reason = _llm_semantic_score(key, answer, metin)
+        out[key] = int(max(rule_score, llm_score))
+        reasons[key] = llm_reason or rule_reason or "Değerlendirildi"
+
+    total = sum(out.values())
+    iyi = [k for k, v in out.items() if v == 2]
+    orta = [k for k, v in out.items() if v == 1]
+    zayif = [k for k, v in out.items() if v == 0 and str(sm.get(k, "")).strip()]
+    parts = []
+    if iyi:
+        parts.append("Güçlü: " + ", ".join(iyi))
+    if orta:
+        parts.append("Kısmi: " + ", ".join(orta))
+    if zayif:
+        parts.append("Zayıf: " + ", ".join(zayif))
+    reason = " | ".join(parts) if parts else "Tamamlandı"
+    return out, total, reason[:220]
+
+def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
+    row = [
+        st.session_state.get("session_id", ""),
+        st.session_state.get("user", ""),
+        now_tr(),
+        "",
+        st.session_state.get("metin_id", ""),
+        sm.get("kahraman", ""),
+        sm.get("mekan", ""),
+        sm.get("zaman", ""),
+        sm.get("problem", ""),
+        sm.get("olaylar", ""),
+        sm.get("cozum", ""),
+        sum(1 for _, v in sm.items() if str(v).strip()),
+        scores.get("kahraman", 0),
+        scores.get("mekan", 0),
+        scores.get("zaman", 0),
+        scores.get("problem", 0),
+        scores.get("olaylar", 0),
+        scores.get("cozum", 0),
+        total,
+        reason,
+    ]
+    return append_row_safe("OykuHaritasi", row)
+
+# =========================================================
 # STATE
-# =========================
+# =========================================================
+def reset_activity_states():
+    st.session_state.saved_perf = False
+    st.session_state.busy = False
+
+    st.session_state.prediction = ""
+    st.session_state.reading_speed = ""
+
+    st.session_state.repeat_count = 0
+    st.session_state.tts_count = 0
+    st.session_state.reread_count = 0
+
+    st.session_state.final_important_note = ""
+    st.session_state.prior_knowledge = ""
+    st.session_state.summary = ""
+
+    st.session_state.story_map = {
+        "kahraman": "",
+        "mekan": "",
+        "zaman": "",
+        "problem": "",
+        "olaylar": "",
+        "cozum": ""
+    }
+    st.session_state.story_map_ai_scored = False
+    st.session_state.story_map_last_total = None
+    st.session_state.story_map_last_reason = ""
+    st.session_state.story_map_filled = 0
+
+    st.session_state.hint_level_by_q = {}
+    st.session_state.question_attempts = {}
+    st.session_state.show_text_in_questions = False
+    st.session_state.question_status = {}
+    st.session_state.correct_map = {}
+    st.session_state.skipped_questions = []
+
+    st.session_state.reflection_has_difficulty = ""
+    st.session_state.reflection_strategy = ""
+    st.session_state.reflection_next_time = ""
+
+    st.session_state.last_report = {}
+    st.session_state.ai_hint_text = ""
+    st.session_state.summary_feedback = ""
+    st.session_state.storymap_feedback = ""
+    st.session_state.chat_messages = []
+    st.session_state.last_word_help = ""
+    st.session_state.word_help_answer = ""
+    st.session_state.autosave_cache = {}
+    st.session_state.voice_text = ""
+    st.session_state.summary_feedback_done = False
 
 if "phase" not in st.session_state:
-    st.session_state.phase = "start"
+    st.session_state.phase = "auth"
+if "busy" not in st.session_state:
+    st.session_state.busy = False
 
-if "q_idx" not in st.session_state:
-    st.session_state.q_idx = 0
+if st.session_state.phase != "auth":
+    col_a, col_b = st.columns([9, 1])
+    with col_b:
+        if st.button("Çıkış"):
+            st.session_state.clear()
+            st.rerun()
 
-if "hints" not in st.session_state:
-    st.session_state.hints = 0
-
-if "correct" not in st.session_state:
-    st.session_state.correct = 0
-
-
-# =========================
-# SAMPLE DATA
-# =========================
-
-metin = """Bobo ormanda yürüyordu. Bir kuş gördü. Kuş çok üzgündü çünkü yuvası yıkılmıştı."""
-
-sorular = [
-    {
-        "kok":"Bobo'nun gördüğü kuş ne yapıyordu?",
-        "A":"Yemek yiyordu",
-        "B":"Oyun oynuyordu",
-        "C":"Üzgündü",
-        "dogru":"C"
-    }
-]
-
-# =========================
-# START
-# =========================
-
-if st.session_state.phase == "start":
-
+# =========================================================
+# 1) AUTH
+# =========================================================
+if st.session_state.phase == "auth":
     st.title("Okuma Dostum")
+    st.markdown("<div class='small-note'>Öğrenci kodunu gir, metni seç ve başla.</div>", unsafe_allow_html=True)
 
-    if st.button("Başla"):
-        st.session_state.phase = "read"
+    u = st.text_input("Öğrenci Kodun")
+
+    try:
+        metin_ids_all = list_metin_ids()
+    except Exception:
+        metin_ids_all = []
+        st.error("❌ MetinBankasi okunamadı.")
+        st.code(traceback.format_exc())
+
+    selected_id = st.selectbox("Metin seç", metin_ids_all) if metin_ids_all else st.text_input("Metin ID", "Metin_001")
+
+    if st.button("Başla") and u and selected_id:
+        st.session_state.user = u
+        st.session_state.metin_id = selected_id
+        st.session_state.session_id = str(uuid.uuid4())[:8]
+        st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
+        reset_activity_states()
+        st.session_state.phase = "setup"
         st.rerun()
 
-# =========================
-# READ
-# =========================
+# =========================================================
+# 2) SETUP
+# =========================================================
+elif st.session_state.phase == "setup":
+    st.subheader("Metni Hazırla")
 
-elif st.session_state.phase == "read":
+    selected_id = st.session_state.get("metin_id", "")
+    if not selected_id:
+        st.error("Metin seçilmemiş.")
+        st.stop()
 
-    st.subheader("Metni Oku")
+    st.markdown(f"<div class='card'><b>Seçili Metin</b><br/>{selected_id}</div>", unsafe_allow_html=True)
 
-    st.markdown(f"<div class='highlight'>{metin}</div>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Metni Hazırla", disabled=st.session_state.busy):
+            st.session_state.busy = True
+            activity, err = load_activity_from_bank(selected_id)
+            if activity is None:
+                st.session_state.busy = False
+                st.error(f"❌ Yüklenemedi: {err}")
+                st.stop()
 
-    if st.button("Devam"):
-        st.session_state.phase = "questions"
+            st.session_state.activity = activity
+            st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
+            st.session_state.p_idx = 0
+            st.session_state.q_idx = 0
+            st.session_state.hints = 0
+            st.session_state.start_t = time.time()
+            st.session_state.saved_perf = False
+
+            save_reading_process("SESSION_START", f"Metin yüklendi: {selected_id}", paragraf_no=None)
+
+            st.session_state.busy = False
+            st.session_state.phase = "pre"
+            st.rerun()
+    with c2:
+        render_back_button("auth", "⬅️ Geri")
+
+# =========================================================
+# 3) PRE
+# =========================================================
+elif st.session_state.phase == "pre":
+    st.subheader("Okuma Öncesi")
+
+    baslik = st.session_state.activity.get("baslik", "")
+    pre_ipucu = st.session_state.activity.get("pre_ipucu", "")
+
+    if baslik:
+        st.markdown(f"<div class='card'><b>Metnin Başlığı</b><br/>{baslik}</div>", unsafe_allow_html=True)
+    if pre_ipucu:
+        st.markdown(f"<div class='small-note'>{pre_ipucu}</div>", unsafe_allow_html=True)
+
+    curiosity = st.text_input("Sence bu metin ne hakkında olabilir?", value=st.session_state.prediction)
+
+    speed = st.radio(
+        "Okuma hızını seç",
+        ["Yavaş", "Orta", "Hızlı"],
+        index=None,
+        key="reading_speed_radio_pre"
+    )
+
+    st.session_state.prediction = curiosity.strip()
+    st.session_state.reading_speed = speed if speed else ""
+
+    maybe_log_once("pre_prediction", "PRE_PREDICTION_AUTO", st.session_state.prediction, paragraf_no=None)
+    maybe_log_once("pre_speed", "PRE_SPEED_AUTO", st.session_state.reading_speed, paragraf_no=None)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Metne Geç"):
+            if not st.session_state.reading_speed:
+                st.warning("Lütfen önce okuma hızını seç.")
+            else:
+                st.session_state.phase = "during"
+                st.rerun()
+    with c2:
+        render_back_button("setup", "⬅️ Geri")
+
+# =========================================================
+# 4) DURING
+# =========================================================
+elif st.session_state.phase == "during":
+    st.subheader("Metin")
+
+    metin = st.session_state.activity.get("sade_metin", "Metin yok.")
+    st.markdown(
+        f"<div class='small-note'>Okuma hızı: <b>{st.session_state.reading_speed or '-'}</b></div>",
+        unsafe_allow_html=True
+    )
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if st.button("🔊 Metni Dinle"):
+            st.session_state.repeat_count += 1
+            st.session_state.tts_count += 1
+            save_reading_process("TTS_PLAY", "Metin dinlendi", paragraf_no=1)
+            fp = get_audio(metin)
+            if fp:
+                st.audio(fp, format="audio/mp3")
+    with c2:
+        if st.button("🔁 Tekrar Oku"):
+            st.session_state.repeat_count += 1
+            st.session_state.reread_count += 1
+            save_reading_process("REPEAT_READ", "Metin tekrar okundu", paragraf_no=1)
+            st.info("Metni tekrar okuyabilirsin.")
+    with c3:
+        render_back_button("pre", "⬅️ Geri")
+
+    st.markdown(f"<div class='highlight-box'>{metin}</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='card'><b>Metindeki en önemli şey neydi?</b></div>", unsafe_allow_html=True)
+    final_note = st.text_input("Kısa yaz", value=st.session_state.final_important_note)
+    st.session_state.final_important_note = final_note
+    maybe_log_once("important_note_auto", "IMPORTANT_NOTE_FINAL_AUTO", final_note.strip(), paragraf_no=None)
+
+    st.markdown("<div class='card'><b>Bu metin sana daha önce bildiğin bir şeyi hatırlattı mı?</b></div>", unsafe_allow_html=True)
+    pk = st.text_area("Varsa yaz", value=st.session_state.prior_knowledge, height=90)
+    st.session_state.prior_knowledge = pk.strip()
+    maybe_log_once("prior_knowledge_auto", "PRIOR_KNOWLEDGE_AUTO", pk.strip(), paragraf_no=None)
+
+    st.markdown("<div class='card'><b>Bilmediğin kelime var mı?</b></div>", unsafe_allow_html=True)
+    unknown_word = st.text_input("Kelime", value="", key="unknown_word_input_end", placeholder="Örneğin: cesaret")
+
+    if st.button("Kelimeyi Açıkla", key="word_help_btn_end") and unknown_word.strip():
+        try:
+            ans = explain_word_simple(unknown_word.strip(), metin)
+            st.session_state.last_word_help = unknown_word.strip()
+            st.session_state.word_help_answer = ans
+            save_reading_process("WORD_HELP", f"{unknown_word.strip()} | {ans}", paragraf_no=None)
+        except Exception:
+            st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
+
+    if st.session_state.get("word_help_answer"):
+        st.info(f"{st.session_state.get('last_word_help','Kelime')}: {st.session_state.word_help_answer}")
+
+    if st.button("Devam Et"):
+        st.session_state.phase = "post"
         st.rerun()
 
-# =========================
-# QUESTIONS
-# =========================
+# =========================================================
+# 5) POST
+# =========================================================
+elif st.session_state.phase == "post":
+    st.subheader("Okuma Sonrası")
 
+    metin = st.session_state.activity.get("sade_metin", "Metin yok.")
+
+    st.markdown("<div class='card'><b>Metni 2–3 cümleyle anlat.</b></div>", unsafe_allow_html=True)
+
+    voice_audio = st.audio_input("🎤 İstersen sesli anlat", key="summary_audio")
+    if voice_audio is not None:
+        st.audio(voice_audio)
+        if st.button("🎙️ Yazıya Çevir", key="transcribe_summary_btn"):
+            text = transcribe_audio_bytes(voice_audio.getvalue())
+            if text:
+                st.session_state.summary = text
+                st.session_state.voice_text = text
+                save_reading_process("VOICE_TO_TEXT", text, paragraf_no=None)
+                st.success("Sesin yazıya çevrildi.")
+            else:
+                st.warning("Ses şu anda yazıya çevrilemedi.")
+
+    if st.session_state.get("voice_text"):
+        st.info(f"📝 {st.session_state.voice_text}")
+
+    summ = st.text_area("Özetin", value=st.session_state.summary, height=120)
+    st.session_state.summary = summ.strip()
+    maybe_log_once("summary_auto", "POST_SUMMARY_AUTO", st.session_state.summary, paragraf_no=None)
+
+    if st.session_state.summary and not st.session_state.get("summary_feedback_done", False):
+        try:
+            fb = generate_summary_feedback(metin, st.session_state.summary)
+            st.session_state.summary_feedback = fb
+            st.session_state.summary_feedback_done = True
+            save_reading_process("AI_SUMMARY_FEEDBACK", fb, paragraf_no=None)
+        except Exception:
+            st.session_state.summary_feedback = ""
+
+    if st.session_state.get("summary_feedback"):
+        st.info(f"🤖 {st.session_state.summary_feedback}")
+
+    st.divider()
+    st.markdown("<div class='card'><b>Okurken zorlandın mı?</b></div>", unsafe_allow_html=True)
+    difficulty = st.radio("Seç", ["Evet", "Hayır"], index=None, key="difficulty_radio_post")
+
+    st.session_state.reflection_has_difficulty = difficulty or ""
+    maybe_log_once("difficulty_auto", "POST_DIFFICULTY_AUTO", st.session_state.reflection_has_difficulty, paragraf_no=None)
+
+    if difficulty == "Evet":
+        st.markdown("<div class='card'><b>Zorlandığında ne yaptın?</b></div>", unsafe_allow_html=True)
+        r1 = st.text_input("Kısa yaz", value=st.session_state.get("reflection_strategy", ""), key="reflection_strategy_input")
+        st.session_state.reflection_strategy = (r1 or "").strip()
+        maybe_log_once("reflection_strategy_auto", "POST_REFLECTION_STRATEGY_AUTO", st.session_state.reflection_strategy, paragraf_no=None)
+    else:
+        st.session_state.reflection_strategy = ""
+
+    st.markdown("<div class='card'><b>Bir dahaki metinde neyi farklı yapacaksın?</b></div>", unsafe_allow_html=True)
+    r2 = st.text_input("Kısa yaz", value=st.session_state.get("reflection_next_time", ""), key="reflection_next_input")
+    st.session_state.reflection_next_time = (r2 or "").strip()
+    maybe_log_once("reflection_next_auto", "POST_REFLECTION_NEXT_AUTO", st.session_state.reflection_next_time, paragraf_no=None)
+
+    st.divider()
+    st.subheader("Öykü Haritası")
+
+    templates = {
+        "kahraman": "Bu öyküde ... vardı.",
+        "mekan": "Olay ... yerinde geçti.",
+        "zaman": "Olay ... zamanında oldu.",
+        "problem": "Sorun şuydu: ...",
+        "olaylar": "Önce ... oldu. Sonra ... oldu.",
+        "cozum": "Sonunda ... oldu."
+    }
+
+    sm = st.session_state.story_map.copy()
+
+    sm["kahraman"] = st.text_input("👤 Kahraman", value=sm["kahraman"], placeholder=templates["kahraman"], key="story_kahraman")
+    sm["mekan"] = st.text_input("🏠 Mekân", value=sm["mekan"], placeholder=templates["mekan"], key="story_mekan")
+    sm["zaman"] = st.text_input("🕒 Zaman", value=sm["zaman"], placeholder=templates["zaman"], key="story_zaman")
+    sm["problem"] = st.text_input("⚠️ Problem", value=sm["problem"], placeholder=templates["problem"], key="story_problem")
+    sm["olaylar"] = st.text_area("🔁 Olaylar", value=sm["olaylar"], height=100, placeholder=templates["olaylar"], key="story_olaylar")
+    sm["cozum"] = st.text_input("✅ Çözüm", value=sm["cozum"], placeholder=templates["cozum"], key="story_cozum")
+
+    st.session_state.story_map = sm
+
+    maybe_log_once("story_kahraman_auto", "STORY_KAHRAMAN_AUTO", sm["kahraman"], paragraf_no=None)
+    maybe_log_once("story_mekan_auto", "STORY_MEKAN_AUTO", sm["mekan"], paragraf_no=None)
+    maybe_log_once("story_zaman_auto", "STORY_ZAMAN_AUTO", sm["zaman"], paragraf_no=None)
+    maybe_log_once("story_problem_auto", "STORY_PROBLEM_AUTO", sm["problem"], paragraf_no=None)
+    maybe_log_once("story_olaylar_auto", "STORY_OLAYLAR_AUTO", sm["olaylar"], paragraf_no=None)
+    maybe_log_once("story_cozum_auto", "STORY_COZUM_AUTO", sm["cozum"], paragraf_no=None)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Öykü Haritasını Puanla"):
+            filled = sum(1 for _, v in sm.items() if str(v).strip())
+            st.session_state.story_map_filled = filled
+            if filled < 3:
+                st.warning("En az 3 alan doldur.")
+            else:
+                with st.spinner("AI puanlıyor..."):
+                    scores, total, reason = ai_score_story_map(metin, sm)
+                ok = save_story_map_row(sm, scores, total, reason)
+                if ok:
+                    st.session_state.story_map_ai_scored = True
+                    st.session_state.story_map_last_total = total
+                    st.session_state.story_map_last_reason = reason
+                    save_reading_process("STORY_MAP_SCORED", f"{total}/12 | {reason}", paragraf_no=None)
+                    try:
+                        sm_fb = generate_storymap_feedback(metin, sm)
+                        st.session_state.storymap_feedback = sm_fb
+                        save_reading_process("AI_STORYMAP_FEEDBACK", sm_fb, paragraf_no=None)
+                    except Exception:
+                        st.session_state.storymap_feedback = ""
+                    st.success(f"AI Puan: {total}/12")
+    with c2:
+        render_back_button("during", "⬅️ Geri")
+
+    if st.session_state.get("storymap_feedback"):
+        st.info(f"🤖 {st.session_state.storymap_feedback}")
+
+    st.divider()
+    st.subheader("Metinle İlgili Soru Sor")
+
+    if st.session_state.get("chat_messages"):
+        for msg in st.session_state.chat_messages:
+            if msg["role"] == "user":
+                st.markdown(f"<div class='chat-user'><b>Sen:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
+            else:
+                st.markdown(f"<div class='chat-bot'><b>Okuma Dostum:</b><br/>{msg['content']}</div>", unsafe_allow_html=True)
+
+    user_msg = st.text_input("Aklına takılan bir şeyi yaz", key="chat_input_post")
+
+    cchat1, cchat2 = st.columns(2)
+    with cchat1:
+        if st.button("Gönder", key="send_chat_post") and user_msg.strip():
+            try:
+                reply = chat_about_text(
+                    metin=metin,
+                    user_message=user_msg.strip(),
+                    chat_history=st.session_state.get("chat_messages", [])
+                )
+                st.session_state.chat_messages.append({"role": "user", "content": user_msg.strip()})
+                st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+                save_reading_process("CHAT_USER", user_msg.strip(), paragraf_no=None)
+                save_reading_process("CHATBOT_REPLY", reply, paragraf_no=None)
+                st.rerun()
+            except Exception:
+                st.warning("Şu anda chatbot yanıtı üretilemedi.")
+    with cchat2:
+        if st.button("Sorulara Geç"):
+            st.session_state.phase = "questions"
+            st.rerun()
+
+# =========================================================
+# 6) QUESTIONS
+# =========================================================
 elif st.session_state.phase == "questions":
+    st.subheader("Sorular")
 
-    i = st.session_state.q_idx
+    sorular = st.session_state.activity.get("sorular", [])
+    total_q = len(sorular)
+
+    if not sorular:
+        st.error("Sorular bulunamadı.")
+        st.stop()
+
+    metin = st.session_state.activity.get("sade_metin", "")
+    opts = st.session_state.activity.get("opts") or option_letters_for_metin(st.session_state.get("metin_id", ""))
+
+    i = st.session_state.get("q_idx", 0)
+
+    top1, top2 = st.columns([1, 5])
+    with top1:
+        render_back_button("post", "⬅️ Geri")
+    with top2:
+        if st.button("📄 Metni Göster / Gizle"):
+            st.session_state.show_text_in_questions = not st.session_state.show_text_in_questions
+
+    if st.session_state.show_text_in_questions:
+        with st.expander("Metin", expanded=True):
+            st.write(metin)
+
     q = sorular[i]
 
-    st.subheader(f"Soru {i+1}")
+    st.markdown(
+        f"<div class='small-note'>Soru {i+1} / {total_q}</div>",
+        unsafe_allow_html=True
+    )
 
-    st.markdown(f"<div class='card'><b>{q['kok']}</b></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='card'><b>{q.get('kok','')}</b></div>",
+        unsafe_allow_html=True
+    )
 
-    # 🔥 BOŞ GELEN SEÇENEK
     secim = st.radio(
-        "Cevap",
-        ["A","B","C"],
+        "Cevabını seç",
+        opts,
         index=None,
-        format_func=lambda x: f"{x}) {q[x]}"
+        format_func=lambda x: f"{x}) {q.get(x,'')}",
+        key=f"radio_q_{i}"
     )
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("Cevapla"):
+        if st.button("Cevabı Kaydet", key=f"answer_btn_{i}"):
 
             if secim is None:
-                st.warning("Seçim yap")
+                st.warning("Lütfen bir seçenek işaretle.")
                 st.stop()
 
-            if secim == q["dogru"]:
-                st.success("Doğru 🎉")
-                st.session_state.correct += 1
-                st.session_state.phase = "finish"
-                st.rerun()
+            st.session_state.question_attempts[i] = int(st.session_state.question_attempts.get(i, 0)) + 1
+
+            if secim == q.get("dogru"):
+                st.session_state.correct_map[i] = 1
+                st.session_state.question_status[i] = "correct"
+                st.session_state.ai_hint_text = ""
+
+                save_reading_process("QUESTION_CORRECT", f"Soru {i+1} doğru: {secim}", paragraf_no=None)
+
+                if i < total_q - 1:
+                    st.session_state.q_idx = i + 1
+                    st.rerun()
+                else:
+                    st.success("Tüm sorular bitti.")
+
             else:
-                st.error("Yanlış")
+                st.session_state.correct_map[i] = 0
+                st.session_state.question_status[i] = "wrong"
+
+                save_reading_process("QUESTION_WRONG", f"Soru {i+1} yanlış: {secim}", paragraf_no=None)
 
                 st.session_state.hints += 1
-                hint = generate_ai_hint(metin, q, secim)
+                st.session_state.show_text_in_questions = True
 
-                st.info(hint)
+                next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
+                st.session_state.hint_level_by_q[i] = next_level
+
+                try:
+                    ai_hint = generate_ai_hint(metin, q, secim, level=next_level)
+                    st.session_state.ai_hint_text = f"💡 İpucu: {ai_hint}"
+                    save_reading_process(
+                        "AI_HINT_AUTO",
+                        f"Soru {i+1} | seviye={next_level} | {ai_hint}",
+                        paragraf_no=None
+                    )
+                except Exception:
+                    st.session_state.ai_hint_text = "💡 Metni tekrar oku."
+
+                st.rerun()
 
     with col2:
-        if st.button("Geç"):
-            st.session_state.phase = "finish"
+        if st.button("Soruyu Geç", key=f"skip_btn_{i}"):
+
+            st.session_state.correct_map[i] = 0
+            st.session_state.question_status[i] = "skipped"
+
+            if i not in st.session_state.skipped_questions:
+                st.session_state.skipped_questions.append(i)
+
+            save_reading_process("QUESTION_SKIPPED", f"Soru {i+1} geçildi", paragraf_no=None)
+
+            if i < total_q - 1:
+                st.session_state.q_idx = i + 1
+                st.rerun()
+
+    if st.session_state.get("ai_hint_text"):
+        st.info(st.session_state.ai_hint_text)
+
+    st.divider()
+
+    alt1, alt2 = st.columns(2)
+
+    with alt1:
+        if i < total_q - 1:
+            if st.button("Sonraki ➡️"):
+                st.session_state.q_idx += 1
+                st.rerun()
+
+    with alt2:
+        if i == total_q - 1:
+            if st.button("Soruları Bitir"):
+                if len(st.session_state.get("question_status", {})) < total_q:
+                    st.warning("Tüm sorulara cevap ver veya geç.")
+                else:
+                    st.session_state.phase = "finalize"
+                    st.rerun()
+
+# =========================================================
+# 7) FINALIZE
+# =========================================================
+elif st.session_state.phase == "finalize":
+    if not st.session_state.saved_perf:
+        total_q = len(st.session_state.activity.get("sorular", []))
+        qstat = st.session_state.get("question_status", {})
+        dogru = sum(1 for v in qstat.values() if v == "correct")
+        yanlis = sum(1 for v in qstat.values() if v == "wrong")
+        gecilen = sum(1 for v in qstat.values() if v == "skipped")
+        sure = round((time.time() - st.session_state.start_t) / 60, 2)
+        basari_yuzde = f"%{round((dogru / total_q) * 100, 1)}" if total_q else "%0"
+
+        hatali = []
+        for idx, v in qstat.items():
+            if v in {"wrong", "skipped"}:
+                hatali.append(f"{idx+1}:{v}")
+        hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
+
+        row = [
+            st.session_state.session_id,
+            st.session_state.user,
+            st.session_state.login_time,
+            sure,
+            "",
+            basari_yuzde,
+            total_q,
+            dogru,
+            hatali_text,
+            st.session_state.metin_id,
+            st.session_state.hints,
+            "Evet",
+            "Evet",
+            0,
+            0,
+            st.session_state.get("prediction", ""),
+            "",
+            st.session_state.get("reading_speed", ""),
+            st.session_state.get("repeat_count", 0),
+            st.session_state.get("tts_count", 0),
+            st.session_state.get("reread_count", 0),
+            1 if (st.session_state.get("final_important_note", "") or "").strip() else 0,
+            1 if (st.session_state.get("prior_knowledge", "") or "").strip() else 0,
+        ]
+
+        ok = append_row_safe("Performans", row)
+        if ok:
+            st.session_state.last_report = {
+                "basari_yuzde": basari_yuzde,
+                "dogru": dogru,
+                "yanlis": yanlis,
+                "gecilen": gecilen,
+                "total_q": total_q,
+                "sure_dk": sure,
+                "hints": int(st.session_state.get("hints", 0)),
+                "prediction": (st.session_state.get("prediction", "") or "").strip(),
+                "speed": st.session_state.get("reading_speed", ""),
+                "repeat_count": int(st.session_state.get("repeat_count", 0)),
+                "tts_count": int(st.session_state.get("tts_count", 0)),
+                "reread_count": int(st.session_state.get("reread_count", 0)),
+                "important_note": (st.session_state.get("final_important_note", "") or "").strip(),
+                "prior_knowledge": (st.session_state.get("prior_knowledge", "") or "").strip(),
+                "summary": (st.session_state.get("summary", "") or "").strip(),
+            }
+
+            try:
+                sig = compute_metacog_signals()
+                scores = rule_based_metacog_score(sig)
+                save_metacog_rubric_row(scores, scores.get("reason", ""), sig)
+                save_reading_process("METACOG_RUBRIC_SAVED", f"total={scores.get('total',0)}", paragraf_no=None)
+            except Exception:
+                save_reading_process("METACOG_RUBRIC_ERROR", traceback.format_exc()[:2000], paragraf_no=None)
+
+            save_reading_process("SESSION_END", f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk", paragraf_no=None)
+            st.session_state.saved_perf = True
+            st.session_state.phase = "done"
             st.rerun()
 
-# =========================
-# FINISH
-# =========================
+# =========================================================
+# 8) DONE
+# =========================================================
+elif st.session_state.phase == "done":
+    st.success("✅ Çalışma tamamlandı ve kaydedildi.")
 
-elif st.session_state.phase == "finish":
+    rep = st.session_state.get("last_report", {}) or {}
+    story_total = st.session_state.get("story_map_last_total")
+    story_reason = st.session_state.get("story_map_last_reason", "")
 
-    st.subheader("Sonuç")
+    if rep:
+        st.subheader("Sonuçlar")
 
-    st.write(f"Doğru: {st.session_state.correct}")
-    st.write(f"İpucu: {st.session_state.hints}")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(f"<div class='card'><b>Başarı</b><br/>{rep.get('basari_yuzde','')}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>Doğru</b><br/>{rep.get('dogru',0)}/{rep.get('total_q',0)}</div>", unsafe_allow_html=True)
+        with c2:
+            st.markdown(f"<div class='card'><b>Yanlış</b><br/>{rep.get('yanlis',0)}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>Geçilen</b><br/>{rep.get('gecilen',0)}</div>", unsafe_allow_html=True)
+        with c3:
+            st.markdown(f"<div class='card'><b>Süre</b><br/>{rep.get('sure_dk',0)} dk</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='card'><b>İpucu</b><br/>{rep.get('hints',0)}</div>", unsafe_allow_html=True)
 
-    if st.button("Yeniden Başla"):
-        st.session_state.clear()
-        st.rerun()
+        if rep.get("important_note"):
+            st.markdown(f"<div class='card'><b>Metindeki En Önemli Şey</b><br/>{rep.get('important_note')}</div>", unsafe_allow_html=True)
+        if rep.get("prior_knowledge"):
+            st.markdown(f"<div class='card'><b>Ön Bilgi</b><br/>{rep.get('prior_knowledge')}</div>", unsafe_allow_html=True)
+        if rep.get("summary"):
+            st.markdown(f"<div class='card'><b>Özet</b><br/>{rep.get('summary')}</div>", unsafe_allow_html=True)
+
+        st.subheader("Grafik")
+        df = pd.DataFrame(
+            {
+                "Değer": [
+                    float(rep.get("sure_dk", 0)),
+                    int(rep.get("dogru", 0)),
+                    int(rep.get("yanlis", 0)),
+                    int(rep.get("gecilen", 0)),
+                    int(rep.get("hints", 0)),
+                    int(rep.get("tts_count", 0)),
+                    int(rep.get("reread_count", 0)),
+                ]
+            },
+            index=[
+                "Süre (dk)",
+                "Doğru",
+                "Yanlış",
+                "Geçilen",
+                "İpucu",
+                "Dinleme",
+                "Tekrar Okuma",
+            ],
+        )
+        st.bar_chart(df)
+
+        png_bytes = build_report_chart_bytes(rep)
+        report_text = build_report_text(rep, story_total, story_reason)
+        report_json = json.dumps(
+            {
+                "report": rep,
+                "story_map_total": story_total,
+                "story_map_reason": story_reason,
+                "story_map": st.session_state.get("story_map", {}),
+            },
+            ensure_ascii=False,
+            indent=2
+        )
+
+        d1, d2, d3 = st.columns(3)
+        with d1:
+            if png_bytes:
+                st.download_button("Grafiği İndir (PNG)", data=png_bytes, file_name="okuma_grafigi.png", mime="image/png")
+        with d2:
+            st.download_button("Skor Raporu İndir (TXT)", data=report_text.encode("utf-8"), file_name="okuma_raporu.txt", mime="text/plain")
+        with d3:
+            st.download_button("Tüm Sonuçları İndir (JSON)", data=report_json.encode("utf-8"), file_name="okuma_sonuclari.json", mime="application/json")
+
+    if story_total is not None:
+        st.markdown(f"<div class='card'><b>Öykü Haritası Puanı</b><br/>{story_total}/12</div>", unsafe_allow_html=True)
+        if story_reason:
+            st.markdown(f"<div class='small-note'>{story_reason}</div>", unsafe_allow_html=True)
+
+    if st.session_state.get("summary_feedback"):
+        st.markdown(f"<div class='card'><b>Özet Geri Bildirimi</b><br/>{st.session_state.get('summary_feedback')}</div>", unsafe_allow_html=True)
+    if st.session_state.get("storymap_feedback"):
+        st.markdown(f"<div class='card'><b>Öykü Haritası Yorumu</b><br/>{st.session_state.get('storymap_feedback')}</div>", unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Yeni Metin"):
+            st.session_state.phase = "auth"
+            st.session_state.metin_id = ""
+            reset_activity_states()
+            st.rerun()
+    with c2:
+        if st.button("Çıkış Yap"):
+            st.session_state.clear()
+            st.rerun()
