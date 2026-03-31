@@ -486,61 +486,6 @@ Kurallar:
     resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.2)
     return resp.choices[0].message.content.strip()
 
-def chat_about_text(metin: str, user_message: str, chat_history=None):
-    history = chat_history or []
-
-    messages = [
-        {
-            "role": "system",
-            "content": """
-Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine metin okuma desteği veren bir eğitim chatbotusun.
-
-Görevin:
-- Öğrencinin metni daha iyi anlamasına yardım etmek
-- Kısa, açık ve sade cevap vermek
-- Öğrenciyi korkutmadan, sabırlı şekilde yönlendirmek
-
-Kurallar:
-- Türkçe yaz.
-- Kısa yaz.
-- En fazla 2-3 kısa cümle kullan.
-- Zor kelime kullanma.
-- Uzun açıklama yapma.
-- Bir anda çok fazla bilgi verme.
-- Cevabı hemen söylemek yerine öğrenciyi düşünmeye yönlendir.
-- Gerekirse metindeki ilgili bölümü hatırlat.
-- Yargılayıcı olma.
-- Nazik ve motive edici ol.
-- Metin dışına çıkma.
-- Öğrenci bir kelime sorarsa çok basit şekilde açıkla.
-- Öğrenci kafası karışmışsa adım adım yardımcı ol.
-- Gerekirse "Beraber düşünelim." gibi destekleyici ifadeler kullan.
-"""
-        }
-    ]
-
-    for item in history[-6:]:
-        messages.append({"role": item["role"], "content": item["content"]})
-
-    messages.append({
-        "role": "user",
-        "content": f"""METİN:
-{(metin or '')[:3000]}
-
-ÖĞRENCİ MESAJI:
-{user_message}
-
-Bu öğrenci özel öğrenme güçlüğü yaşayan bir ortaokul öğrencisi olabilir.
-Bu yüzden cevabını sade, kısa ve anlaşılır kur."""
-    })
-
-    resp = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.3,
-    )
-    return resp.choices[0].message.content.strip()
-
 # =========================================================
 # GOOGLE SHEETS
 # =========================================================
@@ -980,6 +925,7 @@ def reset_activity_states():
     st.session_state.question_status = {}
     st.session_state.correct_map = {}
     st.session_state.skipped_questions = []
+    st.session_state.question_feedback = {}
 
     st.session_state.reflection_has_difficulty = ""
     st.session_state.reflection_strategy = ""
@@ -1321,6 +1267,8 @@ elif st.session_state.phase == "questions":
         st.session_state.show_text_button_after_hint = False
         st.session_state.last_question_seen = i
         st.session_state.ai_hint_text = ""
+        if i not in st.session_state.question_feedback:
+            st.session_state.question_feedback[i] = ""
 
     top1, top2 = st.columns([1, 5])
     with top1:
@@ -1373,6 +1321,7 @@ elif st.session_state.phase == "questions":
         if secim == q.get("dogru"):
             st.session_state.correct_map[i] = 1
             st.session_state.question_status[i] = "correct"
+            st.session_state.question_feedback[i] = ""
             st.session_state.ai_hint_text = ""
             st.session_state.show_text_button_after_hint = False
             st.session_state.show_text_in_questions = False
@@ -1387,7 +1336,9 @@ elif st.session_state.phase == "questions":
         else:
             st.session_state.correct_map[i] = 0
             st.session_state.question_status[i] = "wrong"
+            st.session_state.question_feedback[i] = "Tekrar dene."
             save_reading_process("QUESTION_WRONG", f"Soru {i+1} yanlış: {secim}", paragraf_no=None)
+            st.rerun()
 
     col1, col2 = st.columns(2)
 
@@ -1422,6 +1373,7 @@ elif st.session_state.phase == "questions":
         if st.button("Soruyu Geç", key=f"skip_btn_{i}"):
             st.session_state.correct_map[i] = 0
             st.session_state.question_status[i] = "skipped"
+            st.session_state.question_feedback[i] = ""
             st.session_state.ai_hint_text = ""
             st.session_state.show_text_button_after_hint = False
             st.session_state.show_text_in_questions = False
@@ -1435,27 +1387,21 @@ elif st.session_state.phase == "questions":
                 st.session_state.q_idx = i + 1
                 st.rerun()
 
+    if st.session_state.question_feedback.get(i):
+        st.warning(st.session_state.question_feedback.get(i))
+
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
 
     st.divider()
 
-    alt1, alt2 = st.columns(2)
-
-    with alt1:
-        if i < total_q - 1:
-            if st.button("Sonraki ➡️", key=f"next_q_{i}"):
-                st.session_state.q_idx += 1
+    if i == total_q - 1:
+        if st.button("Soruları Bitir"):
+            if len(st.session_state.get("question_status", {})) < total_q:
+                st.warning("Tüm sorulara cevap ver veya geç.")
+            else:
+                st.session_state.phase = "finalize"
                 st.rerun()
-
-    with alt2:
-        if i == total_q - 1:
-            if st.button("Soruları Bitir"):
-                if len(st.session_state.get("question_status", {})) < total_q:
-                    st.warning("Tüm sorulara cevap ver veya geç.")
-                else:
-                    st.session_state.phase = "finalize"
-                    st.rerun()
 
 # =========================================================
 # 6) FINALIZE
