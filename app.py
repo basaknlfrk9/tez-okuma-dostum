@@ -221,65 +221,129 @@ def get_audio(text: str):
         st.error("❌ Ses oluşturulamadı. Lütfen tekrar deneyin.")
         return None
 
-def _split_sentences_tr(text: str):
-    text = re.sub(r"\s+", " ", (text or "").strip())
+def _safe_sentence_cut(text: str, target: int) -> int:
+    if not text:
+        return 0
+
+    left = max(0, target - 250)
+    right = min(len(text), target + 250)
+
+    for marker in [". ", "! ", "? ", ".\n", "!\n", "?\n", ".\"", "!\"", "?\""]:
+        pos = text.rfind(marker, left, right)
+        if pos != -1:
+            return pos + 1
+
+    pos = text.rfind(", ", left, right)
+    if pos != -1:
+        return pos + 1
+
+    pos = text.rfind(" ", left, right)
+    if pos != -1:
+        return pos
+
+    return target
+
+def _split_single_block_to_n_parts(text: str, n: int):
+    text = re.sub(r"\s+", " ", (text or "")).strip()
     if not text:
         return []
-    parts = re.split(r'(?<=[.!?…])\s+', text)
-    return [p.strip() for p in parts if p.strip()]
 
-def split_paragraphs(text: str, target_min=450, target_max=750, tail_min=180):
+    if n <= 1:
+        return [text]
+
+    if n == 2:
+        cut1 = _safe_sentence_cut(text, len(text) // 2)
+        return [text[:cut1].strip(), text[cut1:].strip()]
+
+    cut1 = _safe_sentence_cut(text, len(text) // 3)
+    cut2 = _safe_sentence_cut(text, (len(text) * 2) // 3)
+
+    if cut2 <= cut1:
+        cut2 = _safe_sentence_cut(text, cut1 + (len(text) - cut1) // 2)
+
+    parts = [
+        text[:cut1].strip(),
+        text[cut1:cut2].strip(),
+        text[cut2:].strip()
+    ]
+    return [p for p in parts if p]
+
+def split_paragraphs(text: str):
     text = (text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
     text = re.sub(r"\n{3,}", "\n\n", text)
-    placeholder = "<<<P>>>"
-    text = re.sub(r"\n\s*\n", placeholder, text)
-    text = re.sub(r"\n+", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    text = text.replace(placeholder, "\n\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r" *\n *", "\n", text).strip()
 
-    raw_paras = [p.strip() for p in text.split("\n\n") if p.strip()]
-    if not raw_paras:
-        raw_paras = [text]
+    raw_paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
+    # Tek paragraf gibi geldiyse: 1 / 2 / 3 büyük blok
+    if len(raw_paras) <= 1:
+        flat = re.sub(r"\s+", " ", text).strip()
+        L = len(flat)
+
+        if L < 900:
+            return [flat]
+        elif L < 1800:
+            return _split_single_block_to_n_parts(flat, 2)
+        else:
+            return _split_single_block_to_n_parts(flat, 3)
+
+    # Birden fazla paragraf varsa: paragrafları birleştirip en fazla 3 blok yap
+    total_len = sum(len(p) for p in raw_paras)
+
+    if total_len < 900:
+        target_blocks = 1
+    elif total_len < 1800:
+        target_blocks = 2
+    else:
+        target_blocks = 3
+
+    target_size = total_len / target_blocks
     blocks = []
+    current = ""
+
     for para in raw_paras:
-        sentences = _split_sentences_tr(para)
-        if not sentences:
-            sentences = [para]
+        para = para.strip()
+        if not para:
+            continue
 
-        current = ""
-        for sent in sentences:
-            if not current:
-                current = sent
-            elif len(current) + 1 + len(sent) <= target_max:
-                current = current + " " + sent
-            else:
-                if len(current) < target_min and blocks:
-                    prev = blocks.pop()
-                    merged = prev + " " + current
-                    if len(merged) <= target_max + 150:
-                        blocks.append(merged)
-                    else:
-                        blocks.append(prev)
-                        blocks.append(current)
-                else:
-                    blocks.append(current)
-                current = sent
+        if not current:
+            current = para
+            continue
 
-        if current:
-            blocks.append(current)
+        if len(current) + len(para) + 2 <= target_size * 1.20:
+            current += "\n\n" + para
+        else:
+            blocks.append(current.strip())
+            current = para
 
-    if len(blocks) >= 2 and len(blocks[-1]) < tail_min:
-        merged = blocks[-2] + " " + blocks[-1]
-        if len(merged) <= target_max + 180:
-            blocks[-2] = merged
-            blocks.pop()
+    if current.strip():
+        blocks.append(current.strip())
 
-    final_blocks = [b.strip() for b in blocks if b.strip()]
-    return final_blocks if final_blocks else [text]
+    while len(blocks) > 3:
+        blocks[-2] = blocks[-2].strip() + "\n\n" + blocks[-1].strip()
+        blocks.pop()
+
+    while len(blocks) < 3:
+        longest_i = max(range(len(blocks)), key=lambda i: len(blocks[i]))
+        longest = blocks[longest_i]
+
+        if len(longest) < 1000:
+            break
+
+        split_parts = _split_single_block_to_n_parts(longest, 2)
+        if len(split_parts) != 2:
+            break
+
+        blocks = blocks[:longest_i] + split_parts + blocks[longest_i+1:]
+
+        if len(blocks) >= 3:
+            break
+
+    return [b.strip() for b in blocks if b.strip()]
 
 def build_report_chart_bytes(rep: dict):
     try:
@@ -951,6 +1015,7 @@ def reset_activity_states():
     st.session_state.correct_map = {}
     st.session_state.skipped_questions = []
     st.session_state.question_feedback = {}
+    st.session_state.q_idx = 0
 
     st.session_state.reflection_has_difficulty = ""
     st.session_state.reflection_strategy = ""
