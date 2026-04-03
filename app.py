@@ -1244,8 +1244,7 @@ elif st.session_state.phase == "post":
 # =========================================================
 # 5) QUESTIONS
 # =========================================================
-# =========================================================
-# 5) QUESTIONS
+# 5) QUESTIONS (TEMİZ & STABİL)
 # =========================================================
 elif st.session_state.phase == "questions":
 
@@ -1258,79 +1257,58 @@ elif st.session_state.phase == "questions":
         st.error("Sorular bulunamadı.")
         st.stop()
 
+    # 🔒 Index güvenliği (IndexError fix)
+    i = st.session_state.get("q_idx", 0)
+    if i >= total_q:
+        i = total_q - 1
+        st.session_state.q_idx = i
+
     metin = st.session_state.activity.get("sade_metin", "")
     opts = st.session_state.activity.get("opts") or option_letters_for_metin(st.session_state.get("metin_id", ""))
 
-    i = st.session_state.get("q_idx", 0)
-
-    if st.session_state.get("last_question_seen") != i:
-        st.session_state.show_text_in_questions = False
-        st.session_state.show_text_button_after_hint = False
-        st.session_state.last_question_seen = i
-        st.session_state.ai_hint_text = ""
-        if i not in st.session_state.question_feedback:
-            st.session_state.question_feedback[i] = ""
-
-    st.markdown(
-        f"<div class='small-note'>Soru {i+1} / {total_q}</div>",
-        unsafe_allow_html=True
-    )
-
     q = sorular[i]
 
-    st.markdown(
-        f"<div class='card'><b>{q.get('kok','')}</b></div>",
-        unsafe_allow_html=True
-    )
+    st.markdown(f"### Soru {i+1} / {total_q}")
+    st.markdown(f"**{q.get('kok','')}**")
 
     radio_key = f"radio_q_{i}"
     prev_key = f"{radio_key}_prev"
 
+    # 🔒 Önceki seçimi getir (seçim kaybolma fix)
+    prev_secim = st.session_state.get(prev_key)
+    selected_index = opts.index(prev_secim) if prev_secim in opts else None
+
     secim = st.radio(
         "Cevabını seç",
         opts,
-        index=None,
+        index=selected_index,
         format_func=lambda x: f"{x}) {q.get(x,'')}",
         key=radio_key
     )
 
-    prev_secim = st.session_state.get(prev_key)
-
-    if secim is not None and secim != prev_secim:
+    # Cevap kontrol
+    if secim is not None:
         st.session_state[prev_key] = secim
-        st.session_state.question_attempts[i] = int(st.session_state.question_attempts.get(i, 0)) + 1
 
         if secim == q.get("dogru"):
-            st.session_state.correct_map[i] = 1
             st.session_state.question_status[i] = "correct"
-            st.session_state.question_feedback[i] = ""
+            st.success("✅ Doğru!")
 
-            if i < total_q - 1:
-                st.session_state.q_idx = i + 1
-                st.rerun()
-            else:
-                st.success("Tüm sorular bitti.")
         else:
-            st.session_state.correct_map[i] = 0
             st.session_state.question_status[i] = "wrong"
-            st.session_state.question_feedback[i] = "Tekrar dene."
-            st.rerun()
+            st.error("❌ Tekrar dene")
 
-    # İPUCU
+    # 💡 İpucu
     if st.button("💡 İpucu"):
-        st.session_state.hints += 1
         try:
-            ai_hint = generate_ai_hint(metin, q, secim or "", level=1)
-            st.session_state.ai_hint_text = ai_hint
+            hint = generate_ai_hint(metin, q, secim or "", level=1)
+            st.info(hint)
         except:
-            st.session_state.ai_hint_text = "Metne tekrar bak."
+            st.info("Metnin ilgili kısmına tekrar bak.")
 
-        st.rerun()
+    st.divider()
 
-    if st.session_state.get("ai_hint_text"):
-        st.info(st.session_state.ai_hint_text)
-
-    # NAVİGASYON (SADE)
+    # 🔁 NAVİGASYON (SADE)
     col1, col2 = st.columns(2)
 
     with col1:
@@ -1343,8 +1321,7 @@ elif st.session_state.phase == "questions":
             st.session_state.q_idx = i + 1
             st.rerun()
 
-    st.divider()
-
+    # ✅ Bitirme
     if i == total_q - 1:
         if st.button("Soruları Bitir"):
             st.session_state.phase = "finalize"
