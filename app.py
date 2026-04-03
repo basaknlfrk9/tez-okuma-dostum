@@ -1244,8 +1244,10 @@ elif st.session_state.phase == "post":
 # =========================================================
 # 5) QUESTIONS
 # =========================================================
+# =========================================================
+# 5) QUESTIONS
+# =========================================================
 elif st.session_state.phase == "questions":
-    
 
     st.subheader("Sorular")
 
@@ -1276,15 +1278,6 @@ elif st.session_state.phase == "questions":
 
     q = sorular[i]
 
-    if st.session_state.get("show_text_button_after_hint", False):
-        if st.button("📄 Metni Göster", key=f"show_text_btn_{i}"):
-            st.session_state.show_text_in_questions = True
-            st.rerun()
-
-    if st.session_state.get("show_text_in_questions", False):
-        with st.expander("Metin", expanded=True):
-            st.write(metin)
-
     st.markdown(
         f"<div class='card'><b>{q.get('kok','')}</b></div>",
         unsafe_allow_html=True
@@ -1311,11 +1304,6 @@ elif st.session_state.phase == "questions":
             st.session_state.correct_map[i] = 1
             st.session_state.question_status[i] = "correct"
             st.session_state.question_feedback[i] = ""
-            st.session_state.ai_hint_text = ""
-            st.session_state.show_text_button_after_hint = False
-            st.session_state.show_text_in_questions = False
-
-            save_reading_process("QUESTION_CORRECT", f"Soru {i+1} doğru: {secim}", paragraf_no=None)
 
             if i < total_q - 1:
                 st.session_state.q_idx = i + 1
@@ -1326,80 +1314,41 @@ elif st.session_state.phase == "questions":
             st.session_state.correct_map[i] = 0
             st.session_state.question_status[i] = "wrong"
             st.session_state.question_feedback[i] = "Tekrar dene."
-            save_reading_process("QUESTION_WRONG", f"Soru {i+1} yanlış: {secim}", paragraf_no=None)
             st.rerun()
 
-    c1, c2 = st.columns(2)
+    # İPUCU
+    if st.button("💡 İpucu"):
+        st.session_state.hints += 1
+        try:
+            ai_hint = generate_ai_hint(metin, q, secim or "", level=1)
+            st.session_state.ai_hint_text = ai_hint
+        except:
+            st.session_state.ai_hint_text = "Metne tekrar bak."
 
-    with c1:
-        if st.button("💡 İpucu", key=f"hint_btn_{i}"):
-            st.session_state.hints += 1
-            st.session_state.show_text_button_after_hint = True
-            st.session_state.show_text_in_questions = False
-
-            next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
-            st.session_state.hint_level_by_q[i] = next_level
-
-            try:
-                ai_hint = generate_ai_hint(
-                    metin,
-                    q,
-                    st.session_state.get(radio_key, "") or "",
-                    level=next_level
-                )
-                st.session_state.ai_hint_text = f"💡 İpucu: {ai_hint}"
-                save_reading_process(
-                    "AI_HINT_MANUAL",
-                    f"Soru {i+1} | seviye={next_level} | {ai_hint}",
-                    paragraf_no=None
-                )
-            except Exception:
-                st.session_state.ai_hint_text = "💡 İlgili bölümü tekrar düşünelim."
-
-            st.rerun()
-
-  
-            st.session_state.correct_map[i] = 0
-            st.session_state.question_status[i] = "skipped"
-            st.session_state.question_feedback[i] = ""
-            st.session_state.ai_hint_text = ""
-            st.session_state.show_text_button_after_hint = False
-            st.session_state.show_text_in_questions = False
-
-            if i not in st.session_state.skipped_questions:
-                st.session_state.skipped_questions.append(i)
-
-            save_reading_process("QUESTION_SKIPPED", f"Soru {i+1} geçildi", paragraf_no=None)
-
-           # SADE NAVİGASYON
-nav1, nav2 = st.columns(2)
-
-with nav1:
-    if st.button("⬅️ Önceki", disabled=(i == 0)):
-        st.session_state.q_idx = max(0, i - 1)
         st.rerun()
-
-with nav2:
-    if st.button("➡️ Sonraki", disabled=(i >= total_q - 1)):
-        st.session_state.q_idx = min(total_q - 1, i + 1)
-        st.rerun()
-
-    if st.session_state.question_feedback.get(i):
-        st.warning(st.session_state.question_feedback.get(i))
 
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
+
+    # NAVİGASYON (SADE)
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("⬅️ Önceki", disabled=(i == 0)):
+            st.session_state.q_idx = i - 1
+            st.rerun()
+
+    with col2:
+        if st.button("➡️ Sonraki", disabled=(i >= total_q - 1)):
+            st.session_state.q_idx = i + 1
+            st.rerun()
 
     st.divider()
 
     if i == total_q - 1:
         if st.button("Soruları Bitir"):
-            if len(st.session_state.get("question_status", {})) < total_q:
-                st.warning("Tüm sorulara cevap ver veya geç.")
-            else:
-                st.session_state.phase = "finalize"
-                st.rerun()
-
+            st.session_state.phase = "finalize"
+            st.rerun()
 # =========================================================
 # 6) FINALIZE
 # =========================================================
