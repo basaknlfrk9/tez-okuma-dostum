@@ -1050,29 +1050,45 @@ elif st.session_state.phase == "during":
 
     parts = st.session_state.paragraphs
     p_idx = st.session_state.get("p_idx", 0)
+    total_parts = len(parts)
 
-    st.write(f"Bölüm {p_idx+1} / {len(parts)}")
+    st.write(f"Bölüm {p_idx+1} / {total_parts}")
 
-    # METİN
-    st.write(parts[p_idx])
-
-    # BUTONLAR
+    # 🔊 Dinleme / 🔁 Tekrar
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("⬅️ Önceki") and p_idx > 0:
-            st.session_state.p_idx -= 1
+        if st.button("🔊 Dinle"):
+            fp = get_audio(parts[p_idx])
+            if fp:
+                st.audio(fp, format="audio/mp3")
+
+    with col2:
+        if st.button("🔁 Tekrar Oku"):
+            st.info("Bu bölümü tekrar okuyabilirsin.")
+
+    # 📖 Metin
+    st.write(parts[p_idx])
+
+    st.divider()
+
+    # ⬅️ ➡️ Navigasyon
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("⬅️ Önceki", disabled=(p_idx == 0)):
+            st.session_state.p_idx = max(0, p_idx - 1)
             st.rerun()
 
     with col2:
         if st.button("➡️ Sonraki"):
-            if p_idx < len(parts) - 1:
-                st.session_state.p_idx += 1
+            if p_idx < total_parts - 1:
+                st.session_state.p_idx = p_idx + 1
                 st.rerun()
             else:
-                if st.button("Devam Et"):
-                    st.session_state.phase = "post"
-                    st.rerun()
+                # ❗ buton içinde buton yok → direkt geçiş
+                st.session_state.phase = "questions"
+                st.rerun()
 # =========================================================
 # 4) POST
 # =========================================================
@@ -1213,6 +1229,7 @@ elif st.session_state.phase == "questions":
 
     i = st.session_state.get("q_idx", 0)
 
+    # 🔒 Index hatası fix
     if i >= total_q:
         i = total_q - 1
         st.session_state.q_idx = i
@@ -1222,11 +1239,10 @@ elif st.session_state.phase == "questions":
     st.write(f"Soru {i+1} / {total_q}")
     st.write(q["kok"])
 
-    opts = ["A","B","C","D"]
+    opts = ["A", "B", "C", "D"]
 
     key = f"q_{i}"
     prev = st.session_state.get(key)
-
     index = opts.index(prev) if prev in opts else None
 
     secim = st.radio(
@@ -1245,37 +1261,38 @@ elif st.session_state.phase == "questions":
         else:
             st.error("Yanlış")
 
-    # 💡 İPUCU
+    # 💡 İpucu
     if st.button("💡 İpucu"):
-        st.session_state.hints += 1
-
         try:
             hint = generate_ai_hint(metin, q, secim or "", level=1)
             st.session_state.ai_hint_text = hint
         except:
             st.session_state.ai_hint_text = "Metne tekrar bak."
 
-    # 📄 METNİ GÖSTER
+    # 📄 Metni Göster
     if st.button("📄 Metni Göster"):
-        st.write(metin)
+        st.write(st.session_state.activity.get("sade_metin", ""))
 
-    # İPUCU YAZISI
+    # İpucu yazısı
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
 
-    # NAV
+    st.divider()
+
+    # ⬅️ ➡️ Navigasyon
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("⬅️") and i > 0:
-            st.session_state.q_idx -= 1
+        if st.button("⬅️", disabled=(i == 0)):
+            st.session_state.q_idx = max(0, i - 1)
             st.rerun()
 
     with col2:
-        if st.button("➡️") and i < total_q - 1:
-            st.session_state.q_idx += 1
+        if st.button("➡️", disabled=(i >= total_q - 1)):
+            st.session_state.q_idx = min(total_q - 1, i + 1)
             st.rerun()
 
+    # Bitir
     if i == total_q - 1:
         if st.button("Bitir"):
             st.session_state.phase = "finalize"
