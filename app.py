@@ -1288,7 +1288,7 @@ elif st.session_state.phase == "post":
     else:
         st.session_state.reflection_strategy = ""
 
-    st.markdown("<div class='card'><b>Bir dahaki metinde neyi farklı yapacaksın?</b></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Okurken sana en çok ne yardımcı oldu?</b></div>", unsafe_allow_html=True)
     r2 = st.text_input("Kısa yaz", value=st.session_state.get("reflection_next_time", ""), key="reflection_next_input")
     st.session_state.reflection_next_time = (r2 or "").strip()
     maybe_log_once("reflection_next_auto", "POST_REFLECTION_NEXT_AUTO", st.session_state.reflection_next_time, paragraf_no=None)
