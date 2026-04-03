@@ -270,66 +270,22 @@ def _split_single_block_to_n_parts(text: str, n: int):
     return [p for p in parts if p]
 
 def split_paragraphs(text: str):
-    text = (text or "").replace("\r", "\n").strip()
+    text = (text or "").strip()
+
     if not text:
         return []
 
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    ...
-    return [b.strip() for b in blocks if b.strip()]
+    text = re.sub(r"\n{2,}", "\n\n", text)
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
 
-def build_report_chart_bytes(rep: dict):
-    try:
-        import matplotlib.pyplot as plt
-        labels = ["Süre", "Doğru", "Yanlış", "Geçilen", "İpucu", "Dinleme", "Tekrar"]
-        values = [
-            float(rep.get("sure_dk", 0)),
-            int(rep.get("dogru", 0)),
-            int(rep.get("yanlis", 0)),
-            int(rep.get("gecilen", 0)),
-            int(rep.get("hints", 0)),
-            int(rep.get("tts_count", 0)),
-            int(rep.get("reread_count", 0)),
+    if len(paragraphs) == 1:
+        sentences = re.split(r'(?<=[.!?]) +', paragraphs[0])
+        paragraphs = [
+            " ".join(sentences[i:i+3])
+            for i in range(0, len(sentences), 3)
         ]
-        fig, ax = plt.subplots(figsize=(10, 4.8))
-        ax.bar(labels, values)
-        ax.set_title("Bugünkü Okuma Özeti")
-        fig.tight_layout()
-        buf = BytesIO()
-        fig.savefig(buf, format="png", dpi=180, bbox_inches="tight")
-        plt.close(fig)
-        buf.seek(0)
-        return buf.getvalue()
-    except Exception:
-        return None
 
-def build_report_text(rep: dict, story_total, story_reason):
-    lines = [
-        "OKUMA DOSTUM RAPORU",
-        f"Tarih: {now_tr()}",
-        f"Öğrenci: {st.session_state.get('user','')}",
-        f"Metin ID: {st.session_state.get('metin_id','')}",
-        "",
-        f"Başarı: {rep.get('basari_yuzde','')}",
-        f"Doğru: {rep.get('dogru',0)} / {rep.get('total_q',0)}",
-        f"Yanlış: {rep.get('yanlis',0)}",
-        f"Geçilen: {rep.get('gecilen',0)}",
-        f"Süre (dk): {rep.get('sure_dk',0)}",
-        f"İpucu: {rep.get('hints',0)}",
-        f"Dinleme: {rep.get('tts_count',0)}",
-        f"Tekrar Okuma: {rep.get('reread_count',0)}",
-        "",
-        f"Tahmin: {rep.get('prediction','')}",
-        f"Okuma Hızı: {rep.get('speed','')}",
-        f"En Önemli Şey: {rep.get('important_note','')}",
-        f"Ön Bilgi: {rep.get('prior_knowledge','')}",
-        f"Özet: {rep.get('summary','')}",
-        "",
-        f"Öykü Haritası Puanı: {story_total if story_total is not None else ''}",
-        f"Öykü Haritası Gerekçe: {story_reason or ''}",
-    ]
-    return "\n".join(lines)
-
+    return paragraphs
 # =========================================================
 # OPENAI
 # =========================================================
@@ -1116,7 +1072,7 @@ elif st.session_state.phase == "during":
             save_reading_process("REPEAT_READ", "Metin bölümü tekrar okundu", paragraf_no=p_idx + 1)
             st.info("Bu bölümü tekrar okuyabilirsin.")
 
- st.markdown(parts[p_idx])
+    st.markdown(parts[p_idx])
 
     nav1, nav2 = st.columns(2)
     with nav1:
@@ -1288,14 +1244,8 @@ elif st.session_state.phase == "post":
 # =========================================================
 # 5) QUESTIONS
 # =========================================================
-# =========================================================
-# 5) QUESTIONS (GELİŞTİRİLMİŞ)
-# =========================================================
-# =========================================================
-# 5) QUESTIONS (SADE SÜRÜM - ÖÖG UYUMLU)
-# =========================================================
 elif st.session_state.phase == "questions":
-   
+    
 
     st.subheader("Sorular")
 
@@ -1311,11 +1261,13 @@ elif st.session_state.phase == "questions":
 
     i = st.session_state.get("q_idx", 0)
 
-    # Reset state
     if st.session_state.get("last_question_seen") != i:
         st.session_state.show_text_in_questions = False
-        st.session_state.ai_hint_text = ""
+        st.session_state.show_text_button_after_hint = False
         st.session_state.last_question_seen = i
+        st.session_state.ai_hint_text = ""
+        if i not in st.session_state.question_feedback:
+            st.session_state.question_feedback[i] = ""
 
     st.markdown(
         f"<div class='small-note'>Soru {i+1} / {total_q}</div>",
@@ -1324,7 +1276,15 @@ elif st.session_state.phase == "questions":
 
     q = sorular[i]
 
-    # SORU
+    if st.session_state.get("show_text_button_after_hint", False):
+        if st.button("📄 Metni Göster", key=f"show_text_btn_{i}"):
+            st.session_state.show_text_in_questions = True
+            st.rerun()
+
+    if st.session_state.get("show_text_in_questions", False):
+        with st.expander("Metin", expanded=True):
+            st.write(metin)
+
     st.markdown(
         f"<div class='card'><b>{q.get('kok','')}</b></div>",
         unsafe_allow_html=True
@@ -1343,55 +1303,102 @@ elif st.session_state.phase == "questions":
 
     prev_secim = st.session_state.get(prev_key)
 
-    # CEVAP KONTROL
     if secim is not None and secim != prev_secim:
         st.session_state[prev_key] = secim
         st.session_state.question_attempts[i] = int(st.session_state.question_attempts.get(i, 0)) + 1
 
         if secim == q.get("dogru"):
-            st.success("✅ Doğru!")
+            st.session_state.correct_map[i] = 1
             st.session_state.question_status[i] = "correct"
+            st.session_state.question_feedback[i] = ""
+            st.session_state.ai_hint_text = ""
+            st.session_state.show_text_button_after_hint = False
+            st.session_state.show_text_in_questions = False
+
             save_reading_process("QUESTION_CORRECT", f"Soru {i+1} doğru: {secim}", paragraf_no=None)
+
+            if i < total_q - 1:
+                st.session_state.q_idx = i + 1
+                st.rerun()
+            else:
+                st.success("Tüm sorular bitti.")
         else:
-            st.warning("Tekrar dene 🙂")
+            st.session_state.correct_map[i] = 0
             st.session_state.question_status[i] = "wrong"
+            st.session_state.question_feedback[i] = "Tekrar dene."
             save_reading_process("QUESTION_WRONG", f"Soru {i+1} yanlış: {secim}", paragraf_no=None)
+            st.rerun()
 
-    # İPUCU
-    if st.button("💡 İpucu"):
-        st.session_state.hints += 1
+    c1, c2 = st.columns(2)
 
-        try:
-            ai_hint = generate_ai_hint(metin, q, secim or "", level=1)
-            st.session_state.ai_hint_text = f"💡 {ai_hint}"
-        except:
-            st.session_state.ai_hint_text = "İpucu alınamadı."
+    with c1:
+        if st.button("💡 İpucu", key=f"hint_btn_{i}"):
+            st.session_state.hints += 1
+            st.session_state.show_text_button_after_hint = True
+            st.session_state.show_text_in_questions = False
+
+            next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
+            st.session_state.hint_level_by_q[i] = next_level
+
+            try:
+                ai_hint = generate_ai_hint(
+                    metin,
+                    q,
+                    st.session_state.get(radio_key, "") or "",
+                    level=next_level
+                )
+                st.session_state.ai_hint_text = f"💡 İpucu: {ai_hint}"
+                save_reading_process(
+                    "AI_HINT_MANUAL",
+                    f"Soru {i+1} | seviye={next_level} | {ai_hint}",
+                    paragraf_no=None
+                )
+            except Exception:
+                st.session_state.ai_hint_text = "💡 İlgili bölümü tekrar düşünelim."
+
+            st.rerun()
+
+  
+            st.session_state.correct_map[i] = 0
+            st.session_state.question_status[i] = "skipped"
+            st.session_state.question_feedback[i] = ""
+            st.session_state.ai_hint_text = ""
+            st.session_state.show_text_button_after_hint = False
+            st.session_state.show_text_in_questions = False
+
+            if i not in st.session_state.skipped_questions:
+                st.session_state.skipped_questions.append(i)
+
+            save_reading_process("QUESTION_SKIPPED", f"Soru {i+1} geçildi", paragraf_no=None)
+
+           # SADE NAVİGASYON
+nav1, nav2 = st.columns(2)
+
+with nav1:
+    if st.button("⬅️ Önceki", disabled=(i == 0)):
+        st.session_state.q_idx = max(0, i - 1)
+        st.rerun()
+
+with nav2:
+    if st.button("➡️ Sonraki", disabled=(i >= total_q - 1)):
+        st.session_state.q_idx = min(total_q - 1, i + 1)
+        st.rerun()
+
+    if st.session_state.question_feedback.get(i):
+        st.warning(st.session_state.question_feedback.get(i))
 
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
 
     st.divider()
 
-    # NAVİGASYON (SADE)
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("⬅️ Önceki", disabled=(i == 0)):
-            st.session_state.q_idx = max(0, i - 1)
-            st.rerun()
-
-    with col2:
-        if st.button("➡️ Sonraki", disabled=(i >= total_q - 1)):
-            st.session_state.q_idx = min(total_q - 1, i + 1)
-            st.rerun()
-
-    st.divider()
-
-    # BİTİR
     if i == total_q - 1:
         if st.button("Soruları Bitir"):
-            st.session_state.phase = "finalize"
-            st.rerun()
+            if len(st.session_state.get("question_status", {})) < total_q:
+                st.warning("Tüm sorulara cevap ver veya geç.")
+            else:
+                st.session_state.phase = "finalize"
+                st.rerun()
 
 # =========================================================
 # 6) FINALIZE
@@ -1571,4 +1578,4 @@ elif st.session_state.phase == "done":
     with c2:
         if st.button("Çıkış Yap"):
             st.session_state.clear()
-            st.rerun()
+            st.rerun() 
