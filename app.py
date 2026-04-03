@@ -1116,18 +1116,7 @@ elif st.session_state.phase == "during":
             save_reading_process("REPEAT_READ", "Metin bölümü tekrar okundu", paragraf_no=p_idx + 1)
             st.info("Bu bölümü tekrar okuyabilirsin.")
 
-  st.markdown(f"""
-<div style="
-    background:#ffffff;
-    padding:20px;
-    border-radius:16px;
-    line-height:1.8;
-    font-size:20px;
-    border:1px solid #eee;
-">
-{parts[p_idx]}
-</div>
-""", unsafe_allow_html=True)
+ st.markdown(parts[p_idx])
 
     nav1, nav2 = st.columns(2)
     with nav1:
