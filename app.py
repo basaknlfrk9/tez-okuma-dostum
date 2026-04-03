@@ -275,75 +275,7 @@ def split_paragraphs(text: str):
         return []
 
     text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r" *\n *", "\n", text).strip()
-
-    raw_paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-
-    # Tek paragraf gibi geldiyse: 1 / 2 / 3 büyük blok
-    if len(raw_paras) <= 1:
-        flat = re.sub(r"\s+", " ", text).strip()
-        L = len(flat)
-
-        if L < 900:
-            return [flat]
-        elif L < 1800:
-            return _split_single_block_to_n_parts(flat, 2)
-        else:
-            return _split_single_block_to_n_parts(flat, 3)
-
-    # Birden fazla paragraf varsa: paragrafları birleştirip en fazla 3 blok yap
-    total_len = sum(len(p) for p in raw_paras)
-
-    if total_len < 900:
-        target_blocks = 1
-    elif total_len < 1800:
-        target_blocks = 2
-    else:
-        target_blocks = 3
-
-    target_size = total_len / target_blocks
-    blocks = []
-    current = ""
-
-    for para in raw_paras:
-        para = para.strip()
-        if not para:
-            continue
-
-        if not current:
-            current = para
-            continue
-
-        if len(current) + len(para) + 2 <= target_size * 1.20:
-            current += "\n\n" + para
-        else:
-            blocks.append(current.strip())
-            current = para
-
-    if current.strip():
-        blocks.append(current.strip())
-
-    while len(blocks) > 3:
-        blocks[-2] = blocks[-2].strip() + "\n\n" + blocks[-1].strip()
-        blocks.pop()
-
-    while len(blocks) < 3:
-        longest_i = max(range(len(blocks)), key=lambda i: len(blocks[i]))
-        longest = blocks[longest_i]
-
-        if len(longest) < 1000:
-            break
-
-        split_parts = _split_single_block_to_n_parts(longest, 2)
-        if len(split_parts) != 2:
-            break
-
-        blocks = blocks[:longest_i] + split_parts + blocks[longest_i+1:]
-
-        if len(blocks) >= 3:
-            break
-
+    ...
     return [b.strip() for b in blocks if b.strip()]
 
 def build_report_chart_bytes(rep: dict):
@@ -1184,7 +1116,18 @@ elif st.session_state.phase == "during":
             save_reading_process("REPEAT_READ", "Metin bölümü tekrar okundu", paragraf_no=p_idx + 1)
             st.info("Bu bölümü tekrar okuyabilirsin.")
 
-    st.markdown(f"<div class='highlight-box'>{parts[p_idx]}</div>", unsafe_allow_html=True)
+  st.markdown(f"""
+<div style="
+    background:#ffffff;
+    padding:20px;
+    border-radius:16px;
+    line-height:1.8;
+    font-size:20px;
+    border:1px solid #eee;
+">
+{parts[p_idx]}
+</div>
+""", unsafe_allow_html=True)
 
     nav1, nav2 = st.columns(2)
     with nav1:
@@ -1363,7 +1306,7 @@ elif st.session_state.phase == "post":
 # 5) QUESTIONS (SADE SÜRÜM - ÖÖG UYUMLU)
 # =========================================================
 elif st.session_state.phase == "questions":
-    top_back_button("post")
+   
 
     st.subheader("Sorular")
 
