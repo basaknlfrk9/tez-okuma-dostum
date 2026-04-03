@@ -1245,27 +1245,23 @@ elif st.session_state.phase == "questions":
         else:
             st.error("Yanlış")
 
-    # İPUCU
-    # 💡 İPUCU (DÜZELTİLMİŞ)
-if st.button("💡 İpucu"):
-    st.session_state.hints += 1
+    # 💡 İPUCU
+    if st.button("💡 İpucu"):
+        st.session_state.hints += 1
 
-    try:
-        hint = generate_ai_hint(metin, q, secim or "", level=1)
-        st.session_state.ai_hint_text = hint
-    except:
-        st.session_state.ai_hint_text = "Metne tekrar bak."
+        try:
+            hint = generate_ai_hint(metin, q, secim or "", level=1)
+            st.session_state.ai_hint_text = hint
+        except:
+            st.session_state.ai_hint_text = "Metne tekrar bak."
 
-# 📄 METNİ GÖSTER (AYNI HİZADA!)
-if st.button("📄 Metni Göster"):
-    st.write(metin)
+    # 📄 METNİ GÖSTER
+    if st.button("📄 Metni Göster"):
+        st.write(metin)
 
-# İPUCU YAZISI
-if st.session_state.get("ai_hint_text"):
-    st.info(st.session_state.ai_hint_text)
-
-    if st.button("Metni Göster"):
-        st.write(st.session_state.activity.get("sade_metin", ""))
+    # İPUCU YAZISI
+    if st.session_state.get("ai_hint_text"):
+        st.info(st.session_state.ai_hint_text)
 
     # NAV
     col1, col2 = st.columns(2)
