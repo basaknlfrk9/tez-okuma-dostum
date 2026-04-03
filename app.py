@@ -1274,7 +1274,7 @@ elif st.session_state.phase == "post":
         st.info(f"🤖 {st.session_state.summary_feedback}")
 
     st.divider()
-    st.markdown("<div class='card'><b>Okurken zorlandın mı?</b></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Okurken sana en çok ne yardımcı oldu?</b></div>", unsafe_allow_html=True)
     difficulty = st.radio("Seç", ["Evet", "Hayır"], index=None, key="difficulty_radio_post")
 
     st.session_state.reflection_has_difficulty = difficulty or ""
