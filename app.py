@@ -1039,88 +1039,69 @@ elif st.session_state.phase == "pre":
 # =========================================================
 # 3) DURING
 # =========================================================
+# =========================================================
+# 3) DURING (TEMİZ & HATASIZ)
+# =========================================================
 elif st.session_state.phase == "during":
-    top_back_button("pre")
 
     st.subheader("Metin")
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
+
+    # Paragrafları hazırla
     if "paragraphs" not in st.session_state or not st.session_state.paragraphs:
         st.session_state.paragraphs = split_paragraphs(metin)
 
     parts = st.session_state.paragraphs
+
     if "p_idx" not in st.session_state:
         st.session_state.p_idx = 0
 
     p_idx = st.session_state.p_idx
     total_parts = len(parts)
 
-    st.markdown(
-        f"<div class='small-note'>Okuma hızı: <b>{st.session_state.reading_speed or '-'}</b> | Bölüm <b>{p_idx+1}/{total_parts}</b></div>",
-        unsafe_allow_html=True
-    )
+    st.write(f"Bölüm {p_idx+1} / {total_parts}")
 
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("🔊 Bu Bölümü Dinle"):
-            st.session_state.repeat_count += 1
+    # 🔊 Dinleme ve tekrar butonları
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("🔊 Dinle"):
             st.session_state.tts_count += 1
-            save_reading_process("TTS_PLAY", "Metin bölümü dinlendi", paragraf_no=p_idx + 1)
             fp = get_audio(parts[p_idx])
             if fp:
                 st.audio(fp, format="audio/mp3")
-    with c2:
-        if st.button("🔁 Bu Bölümü Tekrar Oku"):
-            st.session_state.repeat_count += 1
+
+    with col2:
+        if st.button("🔁 Tekrar Oku"):
             st.session_state.reread_count += 1
-            save_reading_process("REPEAT_READ", "Metin bölümü tekrar okundu", paragraf_no=p_idx + 1)
-            st.info("Bu bölümü tekrar okuyabilirsin.")
+            st.info("Tekrar okuyabilirsin.")
 
-   st.write(parts[p_idx])
+    # 📖 METİN (EN ÖNEMLİ KISIM)
+    st.write(parts[p_idx])
 
-    nav1, nav2 = st.columns(2)
-    with nav1:
-        if st.button("⬅️ Önceki Bölüm", disabled=(p_idx == 0)):
-            st.session_state.p_idx = max(0, p_idx - 1)
+    st.divider()
+
+    # ⬅️ ➡️ NAVİGASYON
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("⬅️ Önceki", disabled=(p_idx == 0)):
+            st.session_state.p_idx = p_idx - 1
             st.rerun()
-    with nav2:
-        if p_idx < total_parts - 1:
-            if st.button("Sonraki Bölüm ➡️"):
-                st.session_state.p_idx = min(total_parts - 1, p_idx + 1)
+
+    with col2:
+        if st.button("➡️ Sonraki"):
+            if p_idx < total_parts - 1:
+                st.session_state.p_idx = p_idx + 1
                 st.rerun()
+            else:
+                st.success("Metin bitti 👍")
 
-    if p_idx == total_parts - 1:
-        st.markdown("<div class='mini-success'>Metnin son bölümüne geldin.</div>", unsafe_allow_html=True)
-
-        st.markdown("<div class='card'><b>Metindeki en önemli şey neydi?</b></div>", unsafe_allow_html=True)
-        final_note = st.text_input("Kısa yaz", value=st.session_state.final_important_note)
-        st.session_state.final_important_note = final_note
-        maybe_log_once("important_note_auto", "IMPORTANT_NOTE_FINAL_AUTO", final_note.strip(), paragraf_no=None)
-
-        st.markdown("<div class='card'><b>Bu metin sana daha önce bildiğin bir şeyi hatırlattı mı?</b></div>", unsafe_allow_html=True)
-        pk = st.text_area("Varsa yaz", value=st.session_state.prior_knowledge, height=90)
-        st.session_state.prior_knowledge = pk.strip()
-        maybe_log_once("prior_knowledge_auto", "PRIOR_KNOWLEDGE_AUTO", pk.strip(), paragraf_no=None)
-
-        st.markdown("<div class='card'><b>Bilmediğin kelime var mı?</b></div>", unsafe_allow_html=True)
-        unknown_word = st.text_input("Kelime", value="", key="unknown_word_input_end", placeholder="Örneğin: cesaret")
-
-        if st.button("Kelimeyi Açıkla", key="word_help_btn_end") and unknown_word.strip():
-            try:
-                ans = explain_word_simple(unknown_word.strip(), metin)
-                st.session_state.last_word_help = unknown_word.strip()
-                st.session_state.word_help_answer = ans
-                save_reading_process("WORD_HELP", f"{unknown_word.strip()} | {ans}", paragraf_no=None)
-            except Exception:
-                st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
-
-        if st.session_state.get("word_help_answer"):
-            st.info(f"{st.session_state.get('last_word_help','Kelime')}: {st.session_state.word_help_answer}")
-
-        if st.button("Devam Et"):
-            st.session_state.phase = "post"
-            st.rerun()
-
+                # Basit sorulara geç
+                if st.button("Devam Et"):
+                    st.session_state.phase = "post"
+                    st.rerun()
 # =========================================================
 # 4) POST
 # =========================================================
