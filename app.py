@@ -1682,3 +1682,173 @@ elif st.session_state.phase == "done":
         if st.button("Çıkış Yap"):
             st.session_state.clear()
             st.rerun()
+    maybe_log_once("story_olaylar_auto", "STORY_OLAYLAR_AUTO", sm["olaylar"], paragraf_no=None)
+    maybe_log_once("story_cozum_auto", "STORY_COZUM_AUTO", sm["cozum"], paragraf_no=None)
+
+    if st.button("Öykü Haritasını Kaydet ve Devam Et"):
+        scores, total, reason = ai_score_story_map(metin, sm)
+
+        st.session_state.story_map_last_total = total
+        st.session_state.story_map_last_reason = reason
+        st.session_state.story_map_filled = sum(1 for v in sm.values() if v.strip())
+
+        save_story_map_row(sm, scores, total, reason)
+
+        try:
+            fb = generate_storymap_feedback(metin, sm)
+            st.session_state.storymap_feedback = fb
+            save_reading_process("AI_STORYMAP_FEEDBACK", fb, paragraf_no=None)
+        except Exception:
+            st.session_state.storymap_feedback = ""
+
+        st.session_state.phase = "questions"
+        st.rerun()
+
+# =========================================================
+# 5) QUESTIONS  ✅ ENTEGRE EDİLDİ
+# =========================================================
+elif st.session_state.phase == "questions":
+    top_back_button("post")
+
+    st.subheader("Sorular")
+
+    activity = st.session_state.activity
+    sorular = activity["sorular"]
+    opts = activity["opts"]
+
+    q_idx = st.session_state.q_idx
+    soru = sorular[q_idx]
+
+    st.markdown(f"### Soru {q_idx+1} / {len(sorular)}")
+    st.markdown(f"**{soru['kok']}**")
+
+    secim = st.radio(
+        "Cevabın:",
+        opts,
+        format_func=lambda x: f"{x}) {soru.get(x,'')}",
+        key=f"q_{q_idx}"
+    )
+
+    if st.button("Cevapla"):
+        dogru = soru["dogru"]
+
+        attempts = st.session_state.question_attempts.get(q_idx, 0) + 1
+        st.session_state.question_attempts[q_idx] = attempts
+
+        if secim == dogru:
+            st.success("✅ Doğru!")
+            st.session_state.correct_map[q_idx] = True
+
+            save_reading_process("QUESTION_CORRECT", f"Soru {q_idx+1}", None)
+
+            if q_idx < len(sorular) - 1:
+                st.session_state.q_idx += 1
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.session_state.phase = "finish"
+                st.rerun()
+
+        else:
+            st.error("❌ Yanlış")
+            st.session_state.correct_map[q_idx] = False
+
+            save_reading_process("QUESTION_WRONG", f"Soru {q_idx+1}", None)
+
+    # 💡 AI İPUCU
+    if st.button("💡 İpucu Al"):
+        level = st.session_state.hint_level_by_q.get(q_idx, 1)
+
+        try:
+            hint = generate_ai_hint(
+                activity["sade_metin"],
+                soru,
+                secim,
+                level
+            )
+            st.info(hint)
+
+            st.session_state.hints += 1
+            st.session_state.hint_level_by_q[q_idx] = min(level + 1, 3)
+
+            save_reading_process("AI_HINT", hint, None)
+
+        except Exception:
+            st.warning("İpucu alınamadı.")
+
+    # ⏭️ GEÇ
+    if st.button("⏭️ Soruyu Geç"):
+        st.session_state.skipped_questions.append(q_idx)
+
+        if q_idx < len(sorular) - 1:
+            st.session_state.q_idx += 1
+        else:
+            st.session_state.phase = "finish"
+
+        st.rerun()
+
+# =========================================================
+# 6) FINISH
+# =========================================================
+elif st.session_state.phase == "finish":
+    st.subheader("Tebrikler 🎉")
+
+    total_q = len(st.session_state.activity["sorular"])
+    dogru = sum(1 for v in st.session_state.correct_map.values() if v)
+    yanlis = total_q - dogru
+
+    sure = round((time.time() - st.session_state.start_t) / 60, 2)
+
+    basari = int((dogru / total_q) * 100) if total_q else 0
+
+    st.markdown(f"""
+    ### 📊 Sonuçların
+    - Doğru: {dogru}
+    - Yanlış: {yanlis}
+    - Başarı: %{basari}
+    - Süre: {sure} dk
+    """)
+
+    # 🏅 ROZET
+    if basari >= 80:
+        st.success("🏅 Harika! Süper okudun!")
+    elif basari >= 50:
+        st.info("👍 İyi gidiyorsun!")
+    else:
+        st.warning("💪 Biraz daha pratik yapabilirsin!")
+
+    rep = {
+        "dogru": dogru,
+        "yanlis": yanlis,
+        "total_q": total_q,
+        "basari_yuzde": basari,
+        "sure_dk": sure,
+        "hints": st.session_state.hints,
+        "tts_count": st.session_state.tts_count,
+        "reread_count": st.session_state.reread_count,
+        "prediction": st.session_state.prediction,
+        "speed": st.session_state.reading_speed,
+        "important_note": st.session_state.final_important_note,
+        "prior_knowledge": st.session_state.prior_knowledge,
+        "summary": st.session_state.summary,
+    }
+
+    chart = build_report_chart_bytes(rep)
+    if chart:
+        st.image(chart)
+
+    report_txt = build_report_text(
+        rep,
+        st.session_state.story_map_last_total,
+        st.session_state.story_map_last_reason
+    )
+
+    st.download_button(
+        "📄 Raporu İndir",
+        report_txt,
+        file_name="okuma_raporu.txt"
+    )
+
+    if st.button("Yeniden Başla"):
+        st.session_state.clear()
+        st.rerun()
