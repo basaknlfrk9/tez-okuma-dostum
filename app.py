@@ -1359,6 +1359,9 @@ elif st.session_state.phase == "post":
 # =========================================================
 # 5) QUESTIONS (GELİŞTİRİLMİŞ)
 # =========================================================
+# =========================================================
+# 5) QUESTIONS (SADE SÜRÜM - ÖÖG UYUMLU)
+# =========================================================
 elif st.session_state.phase == "questions":
     top_back_button("post")
 
@@ -1376,31 +1379,11 @@ elif st.session_state.phase == "questions":
 
     i = st.session_state.get("q_idx", 0)
 
-    # Reset logic
+    # Reset state
     if st.session_state.get("last_question_seen") != i:
         st.session_state.show_text_in_questions = False
-        st.session_state.show_text_button_after_hint = False
-        st.session_state.last_question_seen = i
         st.session_state.ai_hint_text = ""
-        if i not in st.session_state.question_feedback:
-            st.session_state.question_feedback[i] = ""
-
-    # 🔢 SORU NAVIGATOR (ÜST)
-    cols = st.columns(min(total_q, 10))
-    for idx in range(total_q):
-        col = cols[idx % len(cols)]
-        label = str(idx + 1)
-
-        if idx in st.session_state.get("skipped_questions", []):
-            label += "⏭️"
-        elif st.session_state.get("question_status", {}).get(idx) == "correct":
-            label += "✅"
-        elif st.session_state.get("question_status", {}).get(idx) == "wrong":
-            label += "❌"
-
-        if col.button(label, key=f"nav_{idx}"):
-            st.session_state.q_idx = idx
-            st.rerun()
+        st.session_state.last_question_seen = i
 
     st.markdown(
         f"<div class='small-note'>Soru {i+1} / {total_q}</div>",
@@ -1408,16 +1391,6 @@ elif st.session_state.phase == "questions":
     )
 
     q = sorular[i]
-
-    # METİN GÖSTER
-    if st.session_state.get("show_text_button_after_hint", False):
-        if st.button("📄 Metni Göster"):
-            st.session_state.show_text_in_questions = True
-            st.rerun()
-
-    if st.session_state.get("show_text_in_questions", False):
-        with st.expander("Metin", expanded=True):
-            st.write(metin)
 
     # SORU
     st.markdown(
@@ -1438,96 +1411,53 @@ elif st.session_state.phase == "questions":
 
     prev_secim = st.session_state.get(prev_key)
 
+    # CEVAP KONTROL
     if secim is not None and secim != prev_secim:
         st.session_state[prev_key] = secim
         st.session_state.question_attempts[i] = int(st.session_state.question_attempts.get(i, 0)) + 1
 
-        # Eğer daha önce skip edilmişse listeden çıkar
-        if i in st.session_state.get("skipped_questions", []):
-            st.session_state.skipped_questions.remove(i)
-
         if secim == q.get("dogru"):
-            st.session_state.correct_map[i] = 1
+            st.success("✅ Doğru!")
             st.session_state.question_status[i] = "correct"
-            st.session_state.question_feedback[i] = ""
-
             save_reading_process("QUESTION_CORRECT", f"Soru {i+1} doğru: {secim}", paragraf_no=None)
-
         else:
-            st.session_state.correct_map[i] = 0
+            st.warning("Tekrar dene 🙂")
             st.session_state.question_status[i] = "wrong"
-            st.session_state.question_feedback[i] = "Tekrar dene."
-
             save_reading_process("QUESTION_WRONG", f"Soru {i+1} yanlış: {secim}", paragraf_no=None)
 
-        st.rerun()
+    # İPUCU
+    if st.button("💡 İpucu"):
+        st.session_state.hints += 1
 
-    # BUTONLAR
-    c1, c2 = st.columns(2)
-
-    with c1:
-        if st.button("💡 İpucu"):
-            st.session_state.hints += 1
-            st.session_state.show_text_button_after_hint = True
-
-            next_level = min(st.session_state.hint_level_by_q.get(i, 0) + 1, 3)
-            st.session_state.hint_level_by_q[i] = next_level
-
-            try:
-                ai_hint = generate_ai_hint(metin, q, secim or "", level=next_level)
-                st.session_state.ai_hint_text = f"💡 {ai_hint}"
-            except:
-                st.session_state.ai_hint_text = "İpucu alınamadı."
-
-            st.rerun()
-
-    with c2:
-        if st.button("Soruyu Geç"):
-            st.session_state.question_status[i] = "skipped"
-
-            if i not in st.session_state.skipped_questions:
-                st.session_state.skipped_questions.append(i)
-
-            save_reading_process("QUESTION_SKIPPED", f"Soru {i+1} geçildi", paragraf_no=None)
-
-            # SADECE ileri git (geri navigasyon artık var)
-            if i < total_q - 1:
-                st.session_state.q_idx = i + 1
-
-            st.rerun()
-
-    # FEEDBACK
-    if st.session_state.question_feedback.get(i):
-        st.warning(st.session_state.question_feedback.get(i))
+        try:
+            ai_hint = generate_ai_hint(metin, q, secim or "", level=1)
+            st.session_state.ai_hint_text = f"💡 {ai_hint}"
+        except:
+            st.session_state.ai_hint_text = "İpucu alınamadı."
 
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
 
-    # ALT NAVİGASYON
-    nav1, nav2 = st.columns(2)
+    st.divider()
 
-    with nav1:
-        if st.button("⬅️ Önceki Soru", disabled=(i == 0)):
+    # NAVİGASYON (SADE)
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("⬅️ Önceki", disabled=(i == 0)):
             st.session_state.q_idx = max(0, i - 1)
             st.rerun()
 
-    with nav2:
-        if st.button("➡️ Sonraki Soru", disabled=(i >= total_q - 1)):
+    with col2:
+        if st.button("➡️ Sonraki", disabled=(i >= total_q - 1)):
             st.session_state.q_idx = min(total_q - 1, i + 1)
-            st.rerun()
-
-    # SKIPPED DÖN
-    if st.session_state.get("skipped_questions"):
-        if st.button("⏪ Geçilen Sorulara Git"):
-            st.session_state.q_idx = st.session_state.skipped_questions[0]
             st.rerun()
 
     st.divider()
 
-    if st.button("Soruları Bitir"):
-        if len(st.session_state.get("question_status", {})) < total_q:
-            st.warning("Tüm sorulara cevap ver veya geç.")
-        else:
+    # BİTİR
+    if i == total_q - 1:
+        if st.button("Soruları Bitir"):
             st.session_state.phase = "finalize"
             st.rerun()
 
