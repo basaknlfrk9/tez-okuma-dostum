@@ -271,21 +271,25 @@ def _split_single_block_to_n_parts(text: str, n: int):
 
 def split_paragraphs(text: str):
     text = (text or "").strip()
-
     if not text:
         return []
 
-    text = re.sub(r"\n{2,}", "\n\n", text)
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    sentences = re.split(r'(?<=[.!?]) +', text)
 
-    if len(paragraphs) == 1:
-        sentences = re.split(r'(?<=[.!?]) +', paragraphs[0])
-        paragraphs = [
-            " ".join(sentences[i:i+3])
-            for i in range(0, len(sentences), 3)
+    if len(sentences) < 6:
+        return [" ".join(sentences)]
+
+    elif len(sentences) < 12:
+        mid = len(sentences)//2
+        return [" ".join(sentences[:mid]), " ".join(sentences[mid:])]
+
+    else:
+        third = len(sentences)//3
+        return [
+            " ".join(sentences[:third]),
+            " ".join(sentences[third:2*third]),
+            " ".join(sentences[2*third:])
         ]
-
-    return paragraphs
 # =========================================================
 # OPENAI
 # =========================================================
@@ -1072,7 +1076,7 @@ elif st.session_state.phase == "during":
             save_reading_process("REPEAT_READ", "Metin bölümü tekrar okundu", paragraf_no=p_idx + 1)
             st.info("Bu bölümü tekrar okuyabilirsin.")
 
-    st.markdown(parts[p_idx])
+   st.write(parts[p_idx])
 
     nav1, nav2 = st.columns(2)
     with nav1:
@@ -1176,7 +1180,7 @@ elif st.session_state.phase == "post":
     else:
         st.session_state.reflection_strategy = ""
 
-    st.markdown("<div class='card'><b>Bir dahaki metinde neyi farklı yapacaksın?</b></div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'><b>Okurken sana en çok ne yardımcı oldu?</b></div>", unsafe_allow_html=True)
     r2 = st.text_input("Kısa yaz", value=st.session_state.get("reflection_next_time", ""), key="reflection_next_input")
     st.session_state.reflection_next_time = (r2 or "").strip()
     maybe_log_once("reflection_next_auto", "POST_REFLECTION_NEXT_AUTO", st.session_state.reflection_next_time, paragraf_no=None)
@@ -1307,6 +1311,8 @@ elif st.session_state.phase == "questions":
             st.info("Metnin ilgili kısmına tekrar bak.")
 
     st.divider()
+  if st.button("📄 Metni Göster"):
+    st.write(metin)
 
     # 🔁 NAVİGASYON (SADE)
     col1, col2 = st.columns(2)
