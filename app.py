@@ -140,6 +140,54 @@ st.markdown(
     margin: 8px 0 12px 0;
   }
 
+  .question-box {
+    background: linear-gradient(135deg, #fff7e6 0%, #eef7ff 100%);
+    border: 2px solid #dbeafe;
+    border-radius: 22px;
+    padding: 18px;
+    margin-bottom: 14px;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.05);
+  }
+
+  .question-title {
+    font-size: 28px;
+    font-weight: 800;
+    color: #234;
+    margin-bottom: 10px;
+  }
+
+  .fun-note {
+    background: #fff3cd;
+    border: 1px solid #ffe08a;
+    color: #7a5b00;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 15px;
+    margin-bottom: 12px;
+  }
+
+  .success-badge {
+    background: #e8f7ea;
+    border: 1px solid #b7e4c7;
+    color: #1f6f43;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-weight: 700;
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+
+  .warning-badge {
+    background: #fff4e5;
+    border: 1px solid #ffd59e;
+    color: #9a5a00;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-weight: 700;
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+
   div[data-testid="stTextInput"] input,
   div[data-testid="stTextArea"] textarea {
     border-radius: 14px !important;
@@ -367,6 +415,28 @@ def split_paragraphs(text: str):
             break
 
     return [b.strip() for b in blocks if b.strip()]
+
+
+def split_paragraphs_by_speed(text: str, speed: str):
+    base_parts = split_paragraphs(text)
+    speed = str(speed or "").strip().lower()
+
+    if speed == "yavaş":
+        finer_parts = []
+        for part in base_parts:
+            subparts = _split_single_block_to_n_parts(part, 2)
+            if len(subparts) > 1:
+                finer_parts.extend(subparts)
+            else:
+                finer_parts.append(part)
+        return [p for p in finer_parts if p.strip()]
+
+    if speed == "hızlı":
+        if len(base_parts) <= 1:
+            return base_parts
+        return ["\n\n".join(base_parts)]
+
+    return base_parts
 
 
 def build_report_chart_bytes(rep: dict):
@@ -1111,7 +1181,7 @@ def reset_activity_states():
         "zaman": "",
         "problem": "",
         "olaylar": "",
-        "cozum": ""
+        "cozum": "",
     }
 
     st.session_state.story_map_ai_scored = False
@@ -1143,8 +1213,6 @@ def reset_activity_states():
     st.session_state.autosave_cache = {}
     st.session_state.voice_text = ""
     st.session_state.summary_feedback_done = False
-
-    # ✅ YENİ EKLENEN (ÇİFT KAYIT ENGELLEME)
     st.session_state.metacog_saved_logged = False
 
 
@@ -1271,6 +1339,12 @@ elif st.session_state.phase == "pre":
         if not st.session_state.reading_speed:
             st.warning("Lütfen önce okuma hızını seç.")
         else:
+            metin = st.session_state.activity.get("sade_metin", "")
+            st.session_state.paragraphs = split_paragraphs_by_speed(
+                metin,
+                st.session_state.reading_speed,
+            )
+            st.session_state.p_idx = 0
             st.session_state.phase = "during"
             st.rerun()
 
@@ -1285,7 +1359,10 @@ elif st.session_state.phase == "during":
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
     if "paragraphs" not in st.session_state or not st.session_state.paragraphs:
-        st.session_state.paragraphs = split_paragraphs(metin)
+        st.session_state.paragraphs = split_paragraphs_by_speed(
+            metin,
+            st.session_state.get("reading_speed", ""),
+        )
 
     parts = st.session_state.paragraphs
     if "p_idx" not in st.session_state:
@@ -1541,12 +1618,26 @@ elif st.session_state.phase == "questions":
 
     q = sorular[i]
 
-    st.markdown(f"### Soru {i + 1} / {total_q}")
+    if i == 0:
+        st.info("🚀 Başlıyoruz!")
+    elif i == total_q - 1:
+        st.info("⭐ Son sorudasın, harika gidiyorsun!")
+    else:
+        st.info("🌈 Devam et, çok iyi gidiyorsun!")
+
+    st.markdown(
+        f"""
+        <div class="question-box">
+            <div class="question-title">🌟 Soru {i + 1} / {total_q}</div>
+            <div class="fun-note">Dikkatli oku, en doğru cevabı bulabilirsin 💪</div>
+            <div style="font-size:20px; line-height:1.8;">{q.get("kok", "")}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     if st.button("📄 Metni Göster", key=f"show_text_{i}"):
         st.write(metin)
-
-    st.write(q.get("kok", ""))
 
     saved = st.session_state.get(f"answer_{i}")
     index = opts.index(saved) if saved in opts else None
@@ -1570,16 +1661,30 @@ elif st.session_state.phase == "questions":
 
         if secim == q.get("dogru"):
             st.session_state.question_status[i] = "correct"
-            st.success("Doğru!")
+            st.markdown(
+                "<div class='success-badge'>🎉 Harika! Doğru cevap verdin.</div>",
+                unsafe_allow_html=True,
+            )
         else:
             st.session_state.question_status[i] = "wrong"
-            st.error("Yanlış, tekrar dene.")
+            st.markdown(
+                "<div class='warning-badge'>🙂 Bir daha düşün, istersen ipucu al.</div>",
+                unsafe_allow_html=True,
+            )
 
     if st.button("💡 İpucu", key=f"hint_btn_{i}"):
         st.session_state.hints = st.session_state.get("hints", 0) + 1
 
+        speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
+        if speed_label == "yavaş":
+            hint_level = 3
+        elif speed_label == "orta":
+            hint_level = 2
+        else:
+            hint_level = 1
+
         try:
-            hint = generate_ai_hint(metin, q, secim or "")
+            hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
             st.session_state.ai_hint_text = hint
             save_reading_process(
                 "HINT_USED",
@@ -1602,16 +1707,28 @@ elif st.session_state.phase == "questions":
 
     with col2:
         if st.button("İleri ➡️", key=f"next_q_{i}"):
-            if f"answer_{i}" not in st.session_state:
-                st.warning("Önce cevap ver.")
-            else:
-                if i < total_q - 1:
-                    st.session_state.q_idx += 1
-                    st.session_state.ai_hint_text = ""
-                    st.rerun()
+            if f"answer_{i}" not in st.session_state or not st.session_state.get(f"answer_{i}"):
+                st.session_state.question_status[i] = "skipped"
+
+            if i < total_q - 1:
+                st.session_state.q_idx += 1
+                st.session_state.ai_hint_text = ""
+                st.rerun()
+
+    unanswered = []
+    for idx in range(total_q):
+        if f"answer_{idx}" not in st.session_state or not st.session_state.get(f"answer_{idx}"):
+            unanswered.append(idx + 1)
+
+    if unanswered:
+        st.warning(f"Henüz boş bıraktığın sorular var: {', '.join(map(str, unanswered))}")
 
     if i == total_q - 1:
         if st.button("Bitir", key="finish_questions"):
+            for idx in range(total_q):
+                if f"answer_{idx}" not in st.session_state or not st.session_state.get(f"answer_{idx}"):
+                    st.session_state.question_status[idx] = "skipped"
+
             st.session_state.phase = "finalize"
             st.rerun()
 
@@ -1635,7 +1752,7 @@ elif st.session_state.phase == "finalize":
         hatali = []
         for idx, v in qstat.items():
             if v in {"wrong", "skipped"}:
-                hatali.append(f"{idx+1}:{v}")
+                hatali.append(f"{idx + 1}:{v}")
         hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
 
         row = [
@@ -1694,7 +1811,7 @@ elif st.session_state.phase == "finalize":
                     save_reading_process(
                         "METACOG_RUBRIC_SAVED",
                         f"total={scores.get('total', 0)}",
-                        paragraf_no=None
+                        paragraf_no=None,
                     )
                     st.session_state.metacog_saved_logged = True
 
@@ -1702,7 +1819,7 @@ elif st.session_state.phase == "finalize":
                 save_reading_process(
                     "METACOG_RUBRIC_ERROR",
                     traceback.format_exc()[:2000],
-                    paragraf_no=None
+                    paragraf_no=None,
                 )
 
             save_reading_process(
@@ -1714,6 +1831,7 @@ elif st.session_state.phase == "finalize":
             st.session_state.saved_perf = True
             st.session_state.phase = "done"
             st.rerun()
+
 
 # =========================================================
 # 7) DONE
