@@ -1111,8 +1111,9 @@ def reset_activity_states():
         "zaman": "",
         "problem": "",
         "olaylar": "",
-        "cozum": "",
+        "cozum": ""
     }
+
     st.session_state.story_map_ai_scored = False
     st.session_state.story_map_last_total = None
     st.session_state.story_map_last_reason = ""
@@ -1142,6 +1143,9 @@ def reset_activity_states():
     st.session_state.autosave_cache = {}
     st.session_state.voice_text = ""
     st.session_state.summary_feedback_done = False
+
+    # ✅ YENİ EKLENEN (ÇİFT KAYIT ENGELLEME)
+    st.session_state.metacog_saved_logged = False
 
 
 if "phase" not in st.session_state:
@@ -1679,18 +1683,23 @@ elif st.session_state.phase == "finalize":
                 "summary": (st.session_state.get("summary", "") or "").strip(),
             }
 
-            try:
-                sig = compute_metacog_signals()
-                scores = rule_based_metacog_score(sig)
-                save_metacog_rubric_row(scores, scores.get("reason", ""), sig)
-                save_reading_process("METACOG_RUBRIC_SAVED", f"total={scores.get('total', 0)}", paragraf_no=None)
-            except Exception:
-                save_reading_process("METACOG_RUBRIC_ERROR", traceback.format_exc()[:2000], paragraf_no=None)
+           try:
+    sig = compute_metacog_signals()
+    scores = rule_based_metacog_score(sig)
+    save_metacog_rubric_row(scores, scores.get("reason", ""), sig)
 
-            save_reading_process(
-                "SESSION_END",
-                f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk",
-                paragraf_no=None,
+    if not st.session_state.get("metacog_saved_logged", False):
+        save_reading_process("METACOG_RUBRIC_SAVED", f"total={scores.get('total', 0)}", paragraf_no=None)
+        st.session_state.metacog_saved_logged = True
+
+except Exception:
+    save_reading_process("METACOG_RUBRIC_ERROR", traceback.format_exc()[:2000], paragraf_no=None)
+
+save_reading_process(
+    "SESSION_END",
+    f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk",
+    paragraf_no=None,
+)
             )
 
             st.session_state.saved_perf = True
