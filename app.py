@@ -292,151 +292,100 @@ def get_audio(text: str):
         return None
 
 
-def _safe_sentence_cut(text: str, target: int) -> int:
-    if not text:
-        return 0
-
-    left = max(0, target - 250)
-    right = min(len(text), target + 250)
-
-    for marker in [". ", "! ", "? ", ".\n", "!\n", "?\n", ".\"", "!\"", "?\""]:
-        pos = text.rfind(marker, left, right)
-        if pos != -1:
-            return pos + 1
-
-    pos = text.rfind(", ", left, right)
-    if pos != -1:
-        return pos + 1
-
-    pos = text.rfind(" ", left, right)
-    if pos != -1:
-        return pos
-
-    return target
-
-
-def _split_single_block_to_n_parts(text: str, n: int):
-    text = re.sub(r"\s+", " ", (text or "")).strip()
+def split_text_into_sentences(text: str):
+    text = str(text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
-    if n <= 1:
-        return [text]
+    text = re.sub(r"\s+", " ", text).strip()
+    sentences = re.split(r"(?<=[.!?…])\s+", text)
 
-    if n == 2:
-        cut1 = _safe_sentence_cut(text, len(text) // 2)
-        return [text[:cut1].strip(), text[cut1:].strip()]
+    cleaned = []
+    for s in sentences:
+        s = s.strip()
+        if s:
+            cleaned.append(s)
 
-    cut1 = _safe_sentence_cut(text, len(text) // 3)
-    cut2 = _safe_sentence_cut(text, (len(text) * 2) // 3)
+    return cleaned
 
-    if cut2 <= cut1:
-        cut2 = _safe_sentence_cut(text, cut1 + (len(text) - cut1) // 2)
 
-    parts = [
-        text[:cut1].strip(),
-        text[cut1:cut2].strip(),
-        text[cut2:].strip(),
-    ]
-    return [p for p in parts if p]
+def build_sentence_blocks(sentences, min_sent=2, max_sent=3):
+    if not sentences:
+        return []
+
+    blocks = []
+    i = 0
+    n = len(sentences)
+
+    while i < n:
+        remaining = n - i
+
+        if remaining <= min_sent:
+            block = " ".join(sentences[i:])
+            blocks.append(block.strip())
+            break
+
+        take = max_sent
+
+        if remaining - take == 1:
+            take -= 1
+
+        block = " ".join(sentences[i:i + take])
+        blocks.append(block.strip())
+        i += take
+
+    return [b for b in blocks if b.strip()]
 
 
 def split_paragraphs(text: str):
-    text = (text or "").replace("\r", "\n").strip()
+    text = str(text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r" *\n *", "\n", text).strip()
+    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
-    raw_paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if len(raw_paragraphs) >= 2:
+        return raw_paragraphs
 
-    if len(raw_paras) <= 1:
-        flat = re.sub(r"\s+", " ", text).strip()
-        L = len(flat)
+    sentences = split_text_into_sentences(text)
 
-        if L < 900:
-            return [flat]
-        elif L < 1800:
-            return _split_single_block_to_n_parts(flat, 2)
-        else:
-            return _split_single_block_to_n_parts(flat, 3)
+    if not sentences:
+        return [text]
 
-    total_len = sum(len(p) for p in raw_paras)
-
-    if total_len < 900:
-        target_blocks = 1
-    elif total_len < 1800:
-        target_blocks = 2
-    else:
-        target_blocks = 3
-
-    target_size = total_len / target_blocks
-    blocks = []
-    current = ""
-
-    for para in raw_paras:
-        para = para.strip()
-        if not para:
-            continue
-
-        if not current:
-            current = para
-            continue
-
-        if len(current) + len(para) + 2 <= target_size * 1.20:
-            current += "\n\n" + para
-        else:
-            blocks.append(current.strip())
-            current = para
-
-    if current.strip():
-        blocks.append(current.strip())
-
-    while len(blocks) > 3:
-        blocks[-2] = blocks[-2].strip() + "\n\n" + blocks[-1].strip()
-        blocks.pop()
-
-    while len(blocks) < 3:
-        longest_i = max(range(len(blocks)), key=lambda i: len(blocks[i]))
-        longest = blocks[longest_i]
-
-        if len(longest) < 1000:
-            break
-
-        split_parts = _split_single_block_to_n_parts(longest, 2)
-        if len(split_parts) != 2:
-            break
-
-        blocks = blocks[:longest_i] + split_parts + blocks[longest_i + 1:]
-
-        if len(blocks) >= 3:
-            break
-
-    return [b.strip() for b in blocks if b.strip()]
+    return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
 
 
 def split_paragraphs_by_speed(text: str, speed: str):
-    base_parts = split_paragraphs(text)
+    text = str(text or "").replace("\r", "\n").strip()
+    if not text:
+        return []
+
+    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    sentences = split_text_into_sentences(text)
+
     speed = str(speed or "").strip().lower()
 
     if speed == "yavaş":
-        finer_parts = []
-        for part in base_parts:
-            subparts = _split_single_block_to_n_parts(part, 2)
-            if len(subparts) > 1:
-                finer_parts.extend(subparts)
-            else:
-                finer_parts.append(part)
-        return [p for p in finer_parts if p.strip()]
+        if sentences:
+            return build_sentence_blocks(sentences, min_sent=1, max_sent=2)
+        return raw_paragraphs if raw_paragraphs else [text]
+
+    if speed == "orta":
+        if sentences:
+            return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
+        return raw_paragraphs if raw_paragraphs else [text]
 
     if speed == "hızlı":
-        if len(base_parts) <= 1:
-            return base_parts
-        return ["\n\n".join(base_parts)]
+        if raw_paragraphs and len(raw_paragraphs) >= 2:
+            return raw_paragraphs
+        if sentences:
+            return build_sentence_blocks(sentences, min_sent=3, max_sent=4)
+        return [text]
 
-    return base_parts
+    if sentences:
+        return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
+
+    return [text]
 
 
 def build_report_chart_bytes(rep: dict):
