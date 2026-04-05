@@ -199,11 +199,15 @@ def top_back_button(target_phase: str, label: str = "⬅️ Geri"):
 
 def maybe_log_once(key: str, kayit_turu: str, value: str, paragraf_no=None):
     value = str(value or "").strip()
+
+    if not value:
+        return
+
     cache = st.session_state.get("autosave_cache", {}) or {}
     if cache.get(key) != value:
         cache[key] = value
         st.session_state.autosave_cache = cache
-        save_reading_process(kayit_turu, value if value else "(boş)", paragraf_no=paragraf_no)
+        save_reading_process(kayit_turu, value, paragraf_no=paragraf_no)
 
 
 def extract_metin_number(metin_id: str) -> int:
