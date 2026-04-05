@@ -1119,8 +1119,7 @@ elif st.session_state.phase == "pre":
 
     if baslik:
         st.markdown(f"<div class='card'><b>Metnin Başlığı</b><br/>{baslik}</div>", unsafe_allow_html=True)
-    if pre_ipucu:
-        st.markdown(f"<div class='small-note'>{pre_ipucu}</div>", unsafe_allow_html=True)
+  
 
     curiosity = st.text_input("Sence bu metin ne hakkında olabilir?", value=st.session_state.prediction)
 
