@@ -1414,11 +1414,14 @@ elif st.session_state.phase == "questions":
 
     # 💡 İPUCU
     if st.button("💡 İpucu"):
-        try:
-            hint = generate_ai_hint(metin, q, secim or "")
-            st.info(hint)
-        except:
-            st.info("Metne tekrar bak.")
+    st.session_state.hints = st.session_state.get("hints", 0) + 1
+    
+    try:
+        hint = generate_ai_hint(metin, q, secim or "")
+        st.info(hint)
+    except:
+        st.info("Metne tekrar bak.")
+      save_reading_process("HINT_USED", f"Soru {i+1}", paragraf_no=None)
 
     # 🔁 NAV BUTONLARI (SADE!)
     col1, col2 = st.columns(2)
