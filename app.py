@@ -1413,13 +1413,12 @@ elif st.session_state.phase == "questions":
 
     # 💡 İPUCU
 # 💡 İPUCU
-if 
+if st.button("💡 İpucu"):
     st.session_state.hints = st.session_state.get("hints", 0) + 1
 
     try:
         hint = generate_ai_hint(metin, q, secim or "")
         st.info(hint)
-        save_reading_process("HINT_USED", f"Soru {i+1} | Seçim: {secim or 'yok'}", paragraf_no=None)
     except:
         st.info("Metne tekrar bak.")
 
