@@ -1413,7 +1413,7 @@ elif st.session_state.phase == "questions":
 
     # 💡 İPUCU
 # 💡 İPUCU
-if st.button("💡 İpucu"):
+if 
     st.session_state.hints = st.session_state.get("hints", 0) + 1
 
     try:
