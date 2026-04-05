@@ -342,15 +342,13 @@ def split_paragraphs(text: str):
     if not text:
         return []
 
-    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    clean_text = re.sub(r"\s*\n\s*", " ", text)
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
-    if len(raw_paragraphs) >= 2:
-        return raw_paragraphs
-
-    sentences = split_text_into_sentences(text)
+    sentences = split_text_into_sentences(clean_text)
 
     if not sentences:
-        return [text]
+        return [clean_text]
 
     return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
 
@@ -360,32 +358,35 @@ def split_paragraphs_by_speed(text: str, speed: str):
     if not text:
         return []
 
-    raw_paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    sentences = split_text_into_sentences(text)
+    # Tüm satır sonlarını boşluğa çevir, böylece bozuk paragraf geçişleri ekrana taşınmaz
+    clean_text = re.sub(r"\s*\n\s*", " ", text)
+    clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
+    sentences = split_text_into_sentences(clean_text)
     speed = str(speed or "").strip().lower()
 
+    # YAVAŞ: 1-2 TAM cümle
     if speed == "yavaş":
         if sentences:
             return build_sentence_blocks(sentences, min_sent=1, max_sent=2)
-        return raw_paragraphs if raw_paragraphs else [text]
+        return [clean_text]
 
+    # ORTA: 2-3 TAM cümle
     if speed == "orta":
         if sentences:
             return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
-        return raw_paragraphs if raw_paragraphs else [text]
+        return [clean_text]
 
+    # HIZLI: 3-4 TAM cümle
     if speed == "hızlı":
-        if raw_paragraphs and len(raw_paragraphs) >= 2:
-            return raw_paragraphs
         if sentences:
             return build_sentence_blocks(sentences, min_sent=3, max_sent=4)
-        return [text]
+        return [clean_text]
 
     if sentences:
         return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
 
-    return [text]
+    return [clean_text]
 
 
 def build_report_chart_bytes(rep: dict):
