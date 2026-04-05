@@ -1621,20 +1621,21 @@ elif st.session_state.phase == "questions":
 # =========================================================
 elif st.session_state.phase == "finalize":
     if not st.session_state.saved_perf:
+
         total_q = len(st.session_state.activity.get("sorular", []))
         qstat = st.session_state.get("question_status", {})
 
         dogru = sum(1 for v in qstat.values() if v == "correct")
         yanlis = sum(1 for v in qstat.values() if v == "wrong")
         gecilen = sum(1 for v in qstat.values() if v == "skipped")
+
         sure = round((time.time() - st.session_state.start_t) / 60, 2)
         basari_yuzde = f"%{round((dogru / total_q) * 100, 1)}" if total_q else "%0"
 
         hatali = []
         for idx, v in qstat.items():
             if v in {"wrong", "skipped"}:
-                hatali.append(f"{idx + 1}:{v}")
-
+                hatali.append(f"{idx+1}:{v}")
         hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
 
         row = [
@@ -1664,6 +1665,7 @@ elif st.session_state.phase == "finalize":
         ]
 
         ok = append_row_safe("Performans", row)
+
         if ok:
             st.session_state.last_report = {
                 "basari_yuzde": basari_yuzde,
@@ -1683,29 +1685,35 @@ elif st.session_state.phase == "finalize":
                 "summary": (st.session_state.get("summary", "") or "").strip(),
             }
 
-              try:
+            try:
                 sig = compute_metacog_signals()
                 scores = rule_based_metacog_score(sig)
                 save_metacog_rubric_row(scores, scores.get("reason", ""), sig)
 
                 if not st.session_state.get("metacog_saved_logged", False):
-                    save_reading_process("METACOG_RUBRIC_SAVED", f"total={scores.get('total', 0)}", paragraf_no=None)
+                    save_reading_process(
+                        "METACOG_RUBRIC_SAVED",
+                        f"total={scores.get('total', 0)}",
+                        paragraf_no=None
+                    )
                     st.session_state.metacog_saved_logged = True
 
             except Exception:
-                save_reading_process("METACOG_RUBRIC_ERROR", traceback.format_exc()[:2000], paragraf_no=None)
+                save_reading_process(
+                    "METACOG_RUBRIC_ERROR",
+                    traceback.format_exc()[:2000],
+                    paragraf_no=None
+                )
 
-save_reading_process(
-    "SESSION_END",
-    f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk",
-    paragraf_no=None,
-)
+            save_reading_process(
+                "SESSION_END",
+                f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk",
+                paragraf_no=None,
             )
 
             st.session_state.saved_perf = True
             st.session_state.phase = "done"
             st.rerun()
-
 
 # =========================================================
 # 7) DONE
