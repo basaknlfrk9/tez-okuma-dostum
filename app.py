@@ -1691,166 +1691,45 @@ elif st.session_state.phase == "finalize":
 # =========================================================
 # 7) DONE
 # =========================================================
+# =========================================================
+# 7) DONE
+# =========================================================
 elif st.session_state.phase == "done":
-    top_back_button("questions")
 
-    st.success("✅ Çalışma tamamlandı ve kaydedildi.")
+    st.success("✅ Çalışma tamamlandı.")
 
-    rep = st.session_state.get("last_report", {}) or {}
-    story_total = st.session_state.get("story_map_last_total")
-    story_reason = st.session_state.get("story_map_last_reason", "")
+    rep = st.session_state.get("last_report", {})
 
     if rep:
         st.subheader("Sonuçlar")
 
         c1, c2, c3 = st.columns(3)
+
         with c1:
-            st.markdown(
-                f"<div class='card'><b>Başarı</b><br/>{rep.get('basari_yuzde', '')}</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"<div class='card'><b>Doğru</b><br/>{rep.get('dogru', 0)}/{rep.get('total_q', 0)}</div>",
-                unsafe_allow_html=True,
-            )
+            st.metric("Başarı", rep.get("basari_yuzde", ""))
+            st.metric("Doğru", rep.get("dogru", 0))
+
         with c2:
-            st.markdown(
-                f"<div class='card'><b>Yanlış</b><br/>{rep.get('yanlis', 0)}</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"<div class='card'><b>Geçilen</b><br/>{rep.get('gecilen', 0)}</div>",
-                unsafe_allow_html=True,
-            )
+            st.metric("Yanlış", rep.get("yanlis", 0))
+            st.metric("Geçilen", rep.get("gecilen", 0))
+
         with c3:
-            st.markdown(
-                f"<div class='card'><b>Süre</b><br/>{rep.get('sure_dk', 0)} dk</div>",
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                f"<div class='card'><b>İpucu</b><br/>{rep.get('hints', 0)}</div>",
-                unsafe_allow_html=True,
-            )
-       c4, c5 = st.columns(2)
+            st.metric("Süre (dk)", rep.get("sure_dk", 0))
+            st.metric("İpucu", rep.get("hints", 0))
 
-      with c4:
-    st.markdown(
-        f"<div class='card'><b>Doğrudan Doğru</b><br/>{rep.get('dogrudan_dogru', 0)}</div>",
-        unsafe_allow_html=True,
-    )
+        # 🔥 YENİ ANALİZ
+        c4, c5 = st.columns(2)
 
-with c5:
-    st.markdown(
-        f"<div class='card'><b>İpucuyla Doğru</b><br/>{rep.get('ipucuyla_dogru', 0)}</div>",
-        unsafe_allow_html=True,
-    )
-        if rep.get("important_note"):
-            st.markdown(
-                f"<div class='card'><b>Metindeki En Önemli Şey</b><br/>{rep.get('important_note')}</div>",
-                unsafe_allow_html=True,
-            )
-        if rep.get("prior_knowledge"):
-            st.markdown(
-                f"<div class='card'><b>Ön Bilgi</b><br/>{rep.get('prior_knowledge')}</div>",
-                unsafe_allow_html=True,
-            )
-        if rep.get("summary"):
-            st.markdown(
-                f"<div class='card'><b>Özet</b><br/>{rep.get('summary')}</div>",
-                unsafe_allow_html=True,
-            )
+        with c4:
+            st.metric("Doğrudan Doğru", rep.get("dogrudan_dogru", 0))
 
-        st.subheader("Grafik")
-        df = pd.DataFrame(
-            {
-                "Değer": [
-                    float(rep.get("sure_dk", 0)),
-                    int(rep.get("dogru", 0)),
-                    int(rep.get("yanlis", 0)),
-                    int(rep.get("gecilen", 0)),
-                    int(rep.get("hints", 0)),
-                    int(rep.get("tts_count", 0)),
-                    int(rep.get("reread_count", 0)),
-                ]
-            },
-            index=[
-                "Süre (dk)",
-                "Doğru",
-                "Yanlış",
-                "Geçilen",
-                "İpucu",
-                "Dinleme",
-                "Tekrar Okuma",
-            ],
-        )
-        st.bar_chart(df)
+        with c5:
+            st.metric("İpucuyla Doğru", rep.get("ipucuyla_dogru", 0))
 
-        png_bytes = build_report_chart_bytes(rep)
-        report_text = build_report_text(rep, story_total, story_reason)
-        report_json = json.dumps(
-            {
-                "report": rep,
-                "story_map_total": story_total,
-                "story_map_reason": story_reason,
-                "story_map": st.session_state.get("story_map", {}),
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+        st.divider()
 
-        d1, d2, d3 = st.columns(3)
-        with d1:
-            if png_bytes:
-                st.download_button(
-                    "Grafiği İndir (PNG)",
-                    data=png_bytes,
-                    file_name="okuma_grafigi.png",
-                    mime="image/png",
-                )
-        with d2:
-            st.download_button(
-                "Skor Raporu İndir (TXT)",
-                data=report_text.encode("utf-8"),
-                file_name="okuma_raporu.txt",
-                mime="text/plain",
-            )
-        with d3:
-            st.download_button(
-                "Tüm Sonuçları İndir (JSON)",
-                data=report_json.encode("utf-8"),
-                file_name="okuma_sonuclari.json",
-                mime="application/json",
-            )
+        st.info("📊 Bu sonuçlar senin öğrenme sürecini daha iyi anlamamıza yardımcı olur.")
 
-    if story_total is not None:
-        st.markdown(
-            f"<div class='card'><b>Öykü Haritası Puanı</b><br/>{story_total}/12</div>",
-            unsafe_allow_html=True,
-        )
-        if story_reason:
-            st.markdown(f"<div class='small-note'>{story_reason}</div>", unsafe_allow_html=True)
-
-    if st.session_state.get("summary_feedback"):
-        st.markdown(
-            f"<div class='card'><b>Özet Geri Bildirimi</b><br/>{st.session_state.get('summary_feedback')}</div>",
-            unsafe_allow_html=True,
-        )
-
-    if st.session_state.get("storymap_feedback"):
-        st.markdown(
-            f"<div class='card'><b>Öykü Haritası Yorumu</b><br/>{st.session_state.get('storymap_feedback')}</div>",
-            unsafe_allow_html=True,
-        )
-
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("Yeni Metin"):
-            st.session_state.phase = "auth"
-            st.session_state.metin_id = ""
-            reset_activity_states()
-            st.rerun()
-
-    with c2:
-        if st.button("Çıkış Yap"):
-            st.session_state.clear()
-            st.rerun()
+    if st.button("Yeniden Başla"):
+        st.session_state.clear()
+        st.rerun()
