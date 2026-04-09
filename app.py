@@ -1217,13 +1217,13 @@ if st.session_state.phase == "auth":
         st.error("❌ MetinBankasi okunamadı.")
         st.code(traceback.format_exc())
 
-   try:
+    try:
     metin_rows = read_sheet_records("MetinBankasi")
     id_to_title = {
         _norm(r.get("metin_id")): _norm(r.get("baslik"))
         for r in metin_rows
     }
-except:
+   except:
     id_to_title = {}
 
 def format_metin(x):
