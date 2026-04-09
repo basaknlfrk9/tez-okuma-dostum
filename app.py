@@ -1650,111 +1650,43 @@ elif st.session_state.phase == "questions":
 # =========================================================
 # 6) FINALIZE
 # =========================================================
+# =========================================================
+# 6) FINALIZE
+# =========================================================
 elif st.session_state.phase == "finalize":
-    if not st.session_state.saved_perf:
 
-        total_q = len(st.session_state.activity.get("sorular", []))
-        qstat = st.session_state.get("question_status", {})
+    total_q = len(st.session_state.activity.get("sorular", []))
+    qstat = st.session_state.get("question_status", {})
 
-        dogru = sum(1 for v in qstat.values() if v == "correct")
-        yanlis = sum(1 for v in qstat.values() if v == "wrong")
-        gecilen = sum(1 for v in qstat.values() if v == "skipped")
-        
-        dogrudan_dogru = sum(
-    1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is True
-)
+    dogru = sum(1 for v in qstat.values() if v == "correct")
+    yanlis = sum(1 for v in qstat.values() if v == "wrong")
+    gecilen = sum(1 for v in qstat.values() if v == "skipped")
 
-ipucuyla_dogru = sum(
-    1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is False
-)
-        sure = round((time.time() - st.session_state.start_t) / 60, 2)
-        basari_yuzde = f"%{round((dogru / total_q) * 100, 1)}" if total_q else "%0"
+    dogrudan_dogru = sum(
+        1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is True
+    )
 
-        hatali = []
-        for idx, v in qstat.items():
-            if v in {"wrong", "skipped"}:
-                hatali.append(f"{idx + 1}:{v}")
-        hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
+    ipucuyla_dogru = sum(
+        1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is False
+    )
 
-        row = [
-            st.session_state.session_id,
-            st.session_state.user,
-            st.session_state.login_time,
-            sure,
-            "",
-            basari_yuzde,
-            total_q,
-            dogru,
-            hatali_text,
-            st.session_state.metin_id,
-            st.session_state.hints,
-            "Evet",
-            "Evet",
-            0,
-            0,
-            st.session_state.get("prediction", ""),
-            "",
-            st.session_state.get("reading_speed", ""),
-            st.session_state.get("repeat_count", 0),
-            st.session_state.get("tts_count", 0),
-            st.session_state.get("reread_count", 0),
-            1 if (st.session_state.get("final_important_note", "") or "").strip() else 0,
-            1 if (st.session_state.get("prior_knowledge", "") or "").strip() else 0,
-        ]
+    sure = round((time.time() - st.session_state.start_t) / 60, 2)
+    basari_yuzde = f"%{round((dogru / total_q) * 100, 1)}" if total_q else "%0"
 
-        ok = append_row_safe("Performans", row)
+    st.session_state.last_report = {
+        "basari_yuzde": basari_yuzde,
+        "dogru": dogru,
+        "yanlis": yanlis,
+        "gecilen": gecilen,
+        "dogrudan_dogru": dogrudan_dogru,
+        "ipucuyla_dogru": ipucuyla_dogru,
+        "total_q": total_q,
+        "sure_dk": sure,
+        "hints": int(st.session_state.get("hints", 0)),
+    }
 
-        if ok:
-            st.session_state.last_report = {
-                "basari_yuzde": basari_yuzde,
-                "dogru": dogru,
-                "yanlis": yanlis,
-                "gecilen": gecilen,
-                "dogrudan_dogru": dogrudan_dogru,
-                "ipucuyla_dogru": ipucuyla_dogru,
-                "total_q": total_q,
-                "sure_dk": sure,
-                "hints": int(st.session_state.get("hints", 0)),
-                "prediction": (st.session_state.get("prediction", "") or "").strip(),
-                "speed": st.session_state.get("reading_speed", ""),
-                "repeat_count": int(st.session_state.get("repeat_count", 0)),
-                "tts_count": int(st.session_state.get("tts_count", 0)),
-                "reread_count": int(st.session_state.get("reread_count", 0)),
-                "important_note": (st.session_state.get("final_important_note", "") or "").strip(),
-                "prior_knowledge": (st.session_state.get("prior_knowledge", "") or "").strip(),
-                "summary": (st.session_state.get("summary", "") or "").strip(),
-            }
-
-            try:
-                sig = compute_metacog_signals()
-                scores = rule_based_metacog_score(sig)
-                save_metacog_rubric_row(scores, scores.get("reason", ""), sig)
-
-                if not st.session_state.get("metacog_saved_logged", False):
-                    save_reading_process(
-                        "METACOG_RUBRIC_SAVED",
-                        f"total={scores.get('total', 0)}",
-                        paragraf_no=None,
-                    )
-                    st.session_state.metacog_saved_logged = True
-
-            except Exception:
-                save_reading_process(
-                    "METACOG_RUBRIC_ERROR",
-                    traceback.format_exc()[:2000],
-                    paragraf_no=None,
-                )
-
-            save_reading_process(
-                "SESSION_END",
-                f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk",
-                paragraf_no=None,
-            )
-
-            st.session_state.saved_perf = True
-            st.session_state.phase = "done"
-            st.rerun()
-
+    st.session_state.phase = "done"
+    st.rerun()
 
 # =========================================================
 # 7) DONE
