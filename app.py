@@ -686,9 +686,8 @@ def append_row_safe(sheet_name: str, row):
 
 
 # =========================================================
-# LOG
+# LOG + OTURUM YEDEK
 # =========================================================
-
 
 def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
     row = [
@@ -704,10 +703,90 @@ def save_reading_process(kayit_turu: str, icerik: str, paragraf_no=None):
     append_row_safe("OkumaSüreci", row)
 
 
+def init_backup_state():
+    st.session_state.setdefault("last_snapshot_hash", "")
+
+
+def safe_json_dumps(obj) -> str:
+    try:
+        return json.dumps(obj, ensure_ascii=False, sort_keys=True, default=str)
+    except Exception:
+        return "{}"
+
+
+def build_session_snapshot():
+    return {
+        "session_id": st.session_state.get("session_id", ""),
+        "user": st.session_state.get("user", ""),
+        "metin_id": st.session_state.get("metin_id", ""),
+        "phase": st.session_state.get("phase", ""),
+        "login_time": st.session_state.get("login_time", ""),
+        "prediction": st.session_state.get("prediction", ""),
+        "reading_speed": st.session_state.get("reading_speed", ""),
+        "p_idx": st.session_state.get("p_idx", 0),
+        "q_idx": st.session_state.get("q_idx", 0),
+        "hints": st.session_state.get("hints", 0),
+        "repeat_count": st.session_state.get("repeat_count", 0),
+        "tts_count": st.session_state.get("tts_count", 0),
+        "reread_count": st.session_state.get("reread_count", 0),
+        "summary": st.session_state.get("summary", ""),
+        "final_important_note": st.session_state.get("final_important_note", ""),
+        "prior_knowledge": st.session_state.get("prior_knowledge", ""),
+        "story_map": st.session_state.get("story_map", {}),
+        "story_map_last_total": st.session_state.get("story_map_last_total"),
+        "story_map_last_reason": st.session_state.get("story_map_last_reason", ""),
+        "question_status": st.session_state.get("question_status", {}),
+        "question_attempts": st.session_state.get("question_attempts", {}),
+        "first_try_correct": st.session_state.get("first_try_correct", {}),
+        "hint_used_questions": list(st.session_state.get("hint_used_questions", set())),
+        "answers": {
+            k: v for k, v in st.session_state.items()
+            if str(k).startswith("answer_")
+        },
+        "start_t": st.session_state.get("start_t", 0),
+        "saved_perf": st.session_state.get("saved_perf", False),
+    }
+
+
+def snapshot_hash(snapshot: dict) -> str:
+    raw = safe_json_dumps(snapshot)
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+def save_session_snapshot(force: bool = False):
+    if not st.session_state.get("session_id"):
+        return
+
+    snapshot = build_session_snapshot()
+    current_hash = snapshot_hash(snapshot)
+    last_hash = st.session_state.get("last_snapshot_hash", "")
+
+    if (not force) and current_hash == last_hash:
+        return
+
+    row = [
+        st.session_state.get("session_id", ""),
+        st.session_state.get("user", ""),
+        now_tr(),
+        st.session_state.get("metin_id", ""),
+        st.session_state.get("phase", ""),
+        safe_json_dumps(snapshot)[:45000],
+        current_hash,
+    ]
+
+    ok = append_row_safe("OturumYedek", row)
+    if ok:
+        st.session_state.last_snapshot_hash = current_hash
+
+
+def save_checkpoint(label: str):
+    save_reading_process("CHECKPOINT", label, paragraf_no=None)
+    save_session_snapshot(force=True)
+
+
 # =========================================================
 # ÜSTBİLİŞSEL RUBRİK
 # =========================================================
-
 
 def compute_metacog_signals():
     qa = st.session_state.get("question_attempts", {}) or {}
@@ -795,7 +874,6 @@ def save_metacog_rubric_row(scores: dict, reason: str, signals: dict):
 # BANKA
 # =========================================================
 
-
 def list_metin_ids():
     rows = read_sheet_records("MetinBankasi")
     ids = []
@@ -877,7 +955,6 @@ def load_activity_from_bank(metin_id: str):
 # =========================================================
 # STORY MAP AI
 # =========================================================
-
 
 def _tr_lower_story(s: str) -> str:
     s = str(s or "")
@@ -1109,7 +1186,6 @@ def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
 # STATE
 # =========================================================
 
-
 def reset_activity_states():
     st.session_state.saved_perf = False
     st.session_state.busy = False
@@ -1164,8 +1240,11 @@ def reset_activity_states():
     st.session_state.voice_text = ""
     st.session_state.summary_feedback_done = False
     st.session_state.metacog_saved_logged = False
+
     st.session_state.first_try_correct = {}
     st.session_state.hint_used_questions = set()
+    st.session_state.last_snapshot_hash = ""
+
 
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
@@ -1173,17 +1252,17 @@ if "phase" not in st.session_state:
 if "busy" not in st.session_state:
     st.session_state.busy = False
 
+init_backup_state()
+
 if st.session_state.phase != "auth":
     col_a, col_b = st.columns([9, 1])
     with col_b:
         if st.button("Çıkış"):
+            save_checkpoint("USER_EXIT")
             st.session_state.clear()
             st.rerun()
 
 
-# =========================================================
-# 1) AUTH
-# =========================================================
 # =========================================================
 # 1) AUTH
 # =========================================================
@@ -1263,9 +1342,11 @@ if st.session_state.phase == "auth":
             st.session_state.saved_perf = False
 
             save_reading_process("SESSION_START", f"Metin yüklendi: {selected_id}", paragraf_no=None)
+            save_session_snapshot(force=True)
 
             st.session_state.phase = "pre"
             st.rerun()
+
 
 # =========================================================
 # 2) PRE
@@ -1311,6 +1392,7 @@ elif st.session_state.phase == "pre":
                 st.session_state.reading_speed,
             )
             st.session_state.p_idx = 0
+            save_checkpoint("PRE_TO_DURING")
             st.session_state.phase = "during"
             st.rerun()
 
@@ -1365,12 +1447,14 @@ elif st.session_state.phase == "during":
     with nav1:
         if st.button("⬅️ Önceki Bölüm", disabled=(p_idx == 0)):
             st.session_state.p_idx = max(0, p_idx - 1)
+            save_session_snapshot(force=True)
             st.rerun()
 
     with nav2:
         if p_idx < total_parts - 1:
             if st.button("Sonraki Bölüm ➡️"):
                 st.session_state.p_idx = min(total_parts - 1, p_idx + 1)
+                save_session_snapshot(force=True)
                 st.rerun()
 
     if p_idx == total_parts - 1:
@@ -1407,6 +1491,7 @@ elif st.session_state.phase == "during":
             st.info(f"{st.session_state.get('last_word_help', 'Kelime')}: {st.session_state.word_help_answer}")
 
         if st.button("Devam Et"):
+            save_checkpoint("DURING_TO_POST")
             st.session_state.phase = "post"
             st.rerun()
 
@@ -1549,17 +1634,19 @@ elif st.session_state.phase == "post":
 
                 st.success(f"AI Puan: {total}/12")
 
+                if total < 8:
+                    st.warning("Bazı bölümler eksik ya da karışık olabilir. Tekrar gözden geçir.")
+
     if st.session_state.get("storymap_feedback"):
         st.info(f"🤖 {st.session_state.storymap_feedback}")
 
     st.divider()
     if st.button("Sorulara Geç"):
+        save_checkpoint("POST_TO_QUESTIONS")
         st.session_state.phase = "questions"
         st.rerun()
 
 
-# =========================================================
-# 5) QUESTIONS
 # =========================================================
 # 5) QUESTIONS
 # =========================================================
@@ -1629,6 +1716,7 @@ elif st.session_state.phase == "questions":
             qa = st.session_state.get("question_attempts", {})
             qa[i] = qa.get(i, 0) + 1
             st.session_state.question_attempts = qa
+            save_session_snapshot(force=True)
 
         if secim == q.get("dogru"):
             if i not in st.session_state.first_try_correct:
@@ -1656,6 +1744,7 @@ elif st.session_state.phase == "questions":
     if st.button("💡 İpucu", key=f"hint_btn_{i}"):
         st.session_state.hints = st.session_state.get("hints", 0) + 1
         st.session_state.hint_used_questions.add(i)
+        save_session_snapshot(force=True)
 
         speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
         if speed_label == "yavaş":
@@ -1685,6 +1774,7 @@ elif st.session_state.phase == "questions":
         if st.button("⬅️ Geri", key=f"back_q_{i}") and i > 0:
             st.session_state.q_idx -= 1
             st.session_state.ai_hint_text = ""
+            save_session_snapshot(force=True)
             st.rerun()
 
     with col2:
@@ -1695,6 +1785,7 @@ elif st.session_state.phase == "questions":
             if i < total_q - 1:
                 st.session_state.q_idx += 1
                 st.session_state.ai_hint_text = ""
+                save_session_snapshot(force=True)
                 st.rerun()
 
     unanswered = []
@@ -1712,90 +1803,256 @@ elif st.session_state.phase == "questions":
                     st.session_state.question_status[idx] = "skipped"
 
             st.session_state.ai_hint_text = ""
+            save_checkpoint("QUESTIONS_TO_FINALIZE")
             st.session_state.phase = "finalize"
             st.rerun()
-# =========================================================
-# 6) FINALIZE
-# =========================================================
+
+
 # =========================================================
 # 6) FINALIZE
 # =========================================================
 elif st.session_state.phase == "finalize":
+    if not st.session_state.saved_perf:
 
-    total_q = len(st.session_state.activity.get("sorular", []))
-    qstat = st.session_state.get("question_status", {})
+        total_q = len(st.session_state.activity.get("sorular", []))
+        qstat = st.session_state.get("question_status", {})
 
-    dogru = sum(1 for v in qstat.values() if v == "correct")
-    yanlis = sum(1 for v in qstat.values() if v == "wrong")
-    gecilen = sum(1 for v in qstat.values() if v == "skipped")
+        dogru = sum(1 for v in qstat.values() if v == "correct")
+        yanlis = sum(1 for v in qstat.values() if v == "wrong")
+        gecilen = sum(1 for v in qstat.values() if v == "skipped")
 
-    dogrudan_dogru = sum(
-        1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is True
-    )
+        dogrudan_dogru = sum(
+            1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is True
+        )
 
-    ipucuyla_dogru = sum(
-        1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is False
-    )
+        ipucuyla_dogru = sum(
+            1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is False
+        )
 
-    sure = round((time.time() - st.session_state.start_t) / 60, 2)
-    basari_yuzde = f"%{round((dogru / total_q) * 100, 1)}" if total_q else "%0"
+        sure = round((time.time() - st.session_state.start_t) / 60, 2)
+        basari_yuzde = f"%{round((dogru / total_q) * 100, 1)}" if total_q else "%0"
 
-    st.session_state.last_report = {
-        "basari_yuzde": basari_yuzde,
-        "dogru": dogru,
-        "yanlis": yanlis,
-        "gecilen": gecilen,
-        "dogrudan_dogru": dogrudan_dogru,
-        "ipucuyla_dogru": ipucuyla_dogru,
-        "total_q": total_q,
-        "sure_dk": sure,
-        "hints": int(st.session_state.get("hints", 0)),
-    }
+        hatali = []
+        for idx, v in qstat.items():
+            if v in {"wrong", "skipped"}:
+                hatali.append(f"{idx + 1}:{v}")
+        hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
 
-    st.session_state.phase = "done"
-    st.rerun()
+        row = [
+            st.session_state.get("session_id", ""),
+            st.session_state.get("user", ""),
+            st.session_state.get("login_time", ""),
+            sure,
+            "",
+            basari_yuzde,
+            total_q,
+            dogru,
+            hatali_text,
+            st.session_state.get("metin_id", ""),
+            st.session_state.get("hints", 0),
+            "Evet",
+            "Evet",
+            0,
+            0,
+            st.session_state.get("prediction", ""),
+            "",
+            st.session_state.get("reading_speed", ""),
+            st.session_state.get("repeat_count", 0),
+            st.session_state.get("tts_count", 0),
+            st.session_state.get("reread_count", 0),
+            1 if (st.session_state.get("final_important_note", "") or "").strip() else 0,
+            1 if (st.session_state.get("prior_knowledge", "") or "").strip() else 0,
+            dogrudan_dogru,
+            ipucuyla_dogru,
+        ]
 
-# =========================================================
-# 7) DONE
-# =========================================================
+        append_row_safe("Performans", row)
+
+        st.session_state.last_report = {
+            "basari_yuzde": basari_yuzde,
+            "dogru": dogru,
+            "yanlis": yanlis,
+            "gecilen": gecilen,
+            "dogrudan_dogru": dogrudan_dogru,
+            "ipucuyla_dogru": ipucuyla_dogru,
+            "total_q": total_q,
+            "sure_dk": sure,
+            "hints": int(st.session_state.get("hints", 0)),
+            "prediction": (st.session_state.get("prediction", "") or "").strip(),
+            "speed": st.session_state.get("reading_speed", ""),
+            "repeat_count": int(st.session_state.get("repeat_count", 0)),
+            "tts_count": int(st.session_state.get("tts_count", 0)),
+            "reread_count": int(st.session_state.get("reread_count", 0)),
+            "important_note": (st.session_state.get("final_important_note", "") or "").strip(),
+            "prior_knowledge": (st.session_state.get("prior_knowledge", "") or "").strip(),
+            "summary": (st.session_state.get("summary", "") or "").strip(),
+        }
+
+        try:
+            sig = compute_metacog_signals()
+            scores = rule_based_metacog_score(sig)
+            save_metacog_rubric_row(scores, scores.get("reason", ""), sig)
+
+            if not st.session_state.get("metacog_saved_logged", False):
+                save_reading_process(
+                    "METACOG_RUBRIC_SAVED",
+                    f"total={scores.get('total', 0)}",
+                    paragraf_no=None,
+                )
+                st.session_state.metacog_saved_logged = True
+
+        except Exception:
+            save_reading_process(
+                "METACOG_RUBRIC_ERROR",
+                traceback.format_exc()[:2000],
+                paragraf_no=None,
+            )
+
+        save_reading_process(
+            "SESSION_END",
+            f"Performans kaydedildi | dogru={dogru}/{total_q} | sure={sure}dk",
+            paragraf_no=None,
+        )
+        save_session_snapshot(force=True)
+
+        st.session_state.saved_perf = True
+        st.session_state.phase = "done"
+        st.rerun()
+
+
 # =========================================================
 # 7) DONE
 # =========================================================
 elif st.session_state.phase == "done":
+    top_back_button("questions")
 
-    st.success("✅ Çalışma tamamlandı.")
+    st.success("✅ Çalışma tamamlandı ve kaydedildi.")
 
-    rep = st.session_state.get("last_report", {})
+    rep = st.session_state.get("last_report", {}) or {}
+    story_total = st.session_state.get("story_map_last_total")
+    story_reason = st.session_state.get("story_map_last_reason", "")
 
     if rep:
         st.subheader("Sonuçlar")
 
         c1, c2, c3 = st.columns(3)
-
         with c1:
-            st.metric("Başarı", rep.get("basari_yuzde", ""))
-            st.metric("Doğru", rep.get("dogru", 0))
-
+            st.markdown(
+                f"<div class='card'><b>Başarı</b><br/>{rep.get('basari_yuzde', '')}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div class='card'><b>Doğru</b><br/>{rep.get('dogru', 0)}/{rep.get('total_q', 0)}</div>",
+                unsafe_allow_html=True,
+            )
         with c2:
-            st.metric("Yanlış", rep.get("yanlis", 0))
-            st.metric("Geçilen", rep.get("gecilen", 0))
-
+            st.markdown(
+                f"<div class='card'><b>Yanlış</b><br/>{rep.get('yanlis', 0)}</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div class='card'><b>Geçilen</b><br/>{rep.get('gecilen', 0)}</div>",
+                unsafe_allow_html=True,
+            )
         with c3:
-            st.metric("Süre (dk)", rep.get("sure_dk", 0))
-            st.metric("İpucu", rep.get("hints", 0))
+            st.markdown(
+                f"<div class='card'><b>Süre</b><br/>{rep.get('sure_dk', 0)} dk</div>",
+                unsafe_allow_html=True,
+            )
+            st.markdown(
+                f"<div class='card'><b>İpucu</b><br/>{rep.get('hints', 0)}</div>",
+                unsafe_allow_html=True,
+            )
 
-        # 🔥 YENİ ANALİZ
         c4, c5 = st.columns(2)
-
         with c4:
-            st.metric("Doğrudan Doğru", rep.get("dogrudan_dogru", 0))
-
+            st.markdown(
+                f"<div class='card'><b>Doğrudan Doğru</b><br/>{rep.get('dogrudan_dogru', 0)}</div>",
+                unsafe_allow_html=True,
+            )
         with c5:
-            st.metric("İpucuyla Doğru", rep.get("ipucuyla_dogru", 0))
+            st.markdown(
+                f"<div class='card'><b>İpucuyla Doğru</b><br/>{rep.get('ipucuyla_dogru', 0)}</div>",
+                unsafe_allow_html=True,
+            )
 
-        st.divider()
+        if rep.get("important_note"):
+            st.markdown(
+                f"<div class='card'><b>Metindeki En Önemli Şey</b><br/>{rep.get('important_note')}</div>",
+                unsafe_allow_html=True,
+            )
+        if rep.get("prior_knowledge"):
+            st.markdown(
+                f"<div class='card'><b>Ön Bilgi</b><br/>{rep.get('prior_knowledge')}</div>",
+                unsafe_allow_html=True,
+            )
+        if rep.get("summary"):
+            st.markdown(
+                f"<div class='card'><b>Özet</b><br/>{rep.get('summary')}</div>",
+                unsafe_allow_html=True,
+            )
 
-        st.info("📊 Bu sonuçlar senin öğrenme sürecini daha iyi anlamamıza yardımcı olur.")
+        st.subheader("Grafik")
+        df = pd.DataFrame(
+            {
+                "Değer": [
+                    float(rep.get("sure_dk", 0)),
+                    int(rep.get("dogru", 0)),
+                    int(rep.get("yanlis", 0)),
+                    int(rep.get("gecilen", 0)),
+                    int(rep.get("hints", 0)),
+                    int(rep.get("tts_count", 0)),
+                    int(rep.get("reread_count", 0)),
+                ]
+            },
+            index=[
+                "Süre (dk)",
+                "Doğru",
+                "Yanlış",
+                "Geçilen",
+                "İpucu",
+                "Dinleme",
+                "Tekrar Okuma",
+            ],
+        )
+        st.bar_chart(df)
+
+        png_bytes = build_report_chart_bytes(rep)
+        report_text = build_report_text(rep, story_total, story_reason)
+        report_json = json.dumps(
+            {
+                "report": rep,
+                "story_map_total": story_total,
+                "story_map_reason": story_reason,
+                "story_map": st.session_state.get("story_map", {}),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        d1, d2, d3 = st.columns(3)
+        with d1:
+            if png_bytes:
+                st.download_button(
+                    "Grafiği İndir (PNG)",
+                    data=png_bytes,
+                    file_name="okuma_grafigi.png",
+                    mime="image/png",
+                )
+        with d2:
+            st.download_button(
+                "Skor Raporu İndir (TXT)",
+                data=report_text,
+                file_name="okuma_raporu.txt",
+                mime="text/plain",
+            )
+        with d3:
+            st.download_button(
+                "JSON İndir",
+                data=report_json,
+                file_name="okuma_raporu.json",
+                mime="application/json",
+            )
 
     if st.button("Yeniden Başla"):
         st.session_state.clear()
