@@ -1616,37 +1616,39 @@ elif st.session_state.phase == "questions":
         key=f"radio_{i}",
     )
 
-    if secim:
-        previous = st.session_state.get(f"answer_{i}")
-        st.session_state[f"answer_{i}"] = secim
+ if secim:
+    previous = st.session_state.get(f"answer_{i}")
+    st.session_state[f"answer_{i}"] = secim
 
-        if previous != secim:
-            qa = st.session_state.get("question_attempts", {})
-            qa[i] = qa.get(i, 0) + 1
-            st.session_state.question_attempts = qa
+    if previous != secim:
+        qa = st.session_state.get("question_attempts", {})
+        qa[i] = qa.get(i, 0) + 1
+        st.session_state.question_attempts = qa
 
-     if secim == q.get("dogru"):
-    if i not in st.session_state.first_try_correct:
-        st.session_state.first_try_correct[i] = (i not in st.session_state.hint_used_questions)
+    # 🔥 DOĞRU / YANLIŞ BLOĞU (TEMİZ)
+    if secim == q.get("dogru"):
+        if i not in st.session_state.first_try_correct:
+            st.session_state.first_try_correct[i] = (i not in st.session_state.hint_used_questions)
 
-    st.session_state.question_status[i] = "correct"
+        st.session_state.question_status[i] = "correct"
 
-    if i in st.session_state.hint_used_questions:
-        st.markdown(
-            "<div class='success-badge'>👏 Güzel! İpucunu kullanarak doğru cevabı buldun.</div>",
-            unsafe_allow_html=True,
-        )
+        if i in st.session_state.hint_used_questions:
+            st.markdown(
+                "<div class='success-badge'>👏 Güzel! İpucunu kullanarak doğru cevabı buldun.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                "<div class='success-badge'>🎉 Harika! Doğru cevap verdin.</div>",
+                unsafe_allow_html=True,
+            )
+
     else:
+        st.session_state.question_status[i] = "wrong"
         st.markdown(
-            "<div class='success-badge'>🎉 Harika! Doğru cevap verdin.</div>",
+            "<div class='warning-badge'>🙂 Bir daha düşün, istersen ipucu al.</div>",
             unsafe_allow_html=True,
         )
-else:
-    st.session_state.question_status[i] = "wrong"
-    st.markdown(
-        "<div class='warning-badge'>🙂 Bir daha düşün, istersen ipucu al.</div>",
-        unsafe_allow_html=True,
-    )
   if st.button("💡 İpucu", key=f"hint_btn_{i}"):
     st.session_state.hints = st.session_state.get("hints", 0) + 1
     st.session_state.hint_used_questions.add(i)
