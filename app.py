@@ -10,6 +10,7 @@ import time
 import re
 import random
 import traceback
+import hashlib
 from gtts import gTTS
 from io import BytesIO
 import pandas as pd
