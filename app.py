@@ -1184,6 +1184,9 @@ if st.session_state.phase != "auth":
 # =========================================================
 # 1) AUTH
 # =========================================================
+# =========================================================
+# 1) AUTH
+# =========================================================
 if st.session_state.phase == "auth":
     st.markdown("<div class='emoji-row'>📚 ✨ 🧠 🌈 📖</div>", unsafe_allow_html=True)
 
@@ -1218,23 +1221,23 @@ if st.session_state.phase == "auth":
         st.code(traceback.format_exc())
 
     try:
-    metin_rows = read_sheet_records("MetinBankasi")
-    id_to_title = {
-        _norm(r.get("metin_id")): _norm(r.get("baslik"))
-        for r in metin_rows
-    }
-   except:
-    id_to_title = {}
+        metin_rows = read_sheet_records("MetinBankasi")
+        id_to_title = {
+            _norm(r.get("metin_id")): _norm(r.get("baslik"))
+            for r in metin_rows
+        }
+    except Exception:
+        id_to_title = {}
 
-def format_metin(x):
-    title = id_to_title.get(x, "")
-    return f"{x} — {title}" if title else x
+    def format_metin(x):
+        title = id_to_title.get(x, "")
+        return f"{x} — {title}" if title else x
 
-selected_id = (
-    st.selectbox("Metin seç", metin_ids_all, format_func=format_metin)
-    if metin_ids_all
-    else st.text_input("Metin ID", "Metin_001")
-)
+    selected_id = (
+        st.selectbox("Metin seç", metin_ids_all, format_func=format_metin)
+        if metin_ids_all
+        else st.text_input("Metin ID", "Metin_001")
+    )
 
     if st.button("Başlayalım"):
         if not u or not selected_id:
@@ -1263,7 +1266,6 @@ selected_id = (
 
             st.session_state.phase = "pre"
             st.rerun()
-
 
 # =========================================================
 # 2) PRE
