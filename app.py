@@ -1164,7 +1164,8 @@ def reset_activity_states():
     st.session_state.voice_text = ""
     st.session_state.summary_feedback_done = False
     st.session_state.metacog_saved_logged = False
-
+    st.session_state.first_try_correct = {}
+    st.session_state.hint_used_questions = set()
 
 if "phase" not in st.session_state:
     st.session_state.phase = "auth"
@@ -1216,11 +1217,24 @@ if st.session_state.phase == "auth":
         st.error("❌ MetinBankasi okunamadı.")
         st.code(traceback.format_exc())
 
-    selected_id = (
-        st.selectbox("Metin seç", metin_ids_all)
-        if metin_ids_all
-        else st.text_input("Metin ID", "Metin_001")
-    )
+   try:
+    metin_rows = read_sheet_records("MetinBankasi")
+    id_to_title = {
+        _norm(r.get("metin_id")): _norm(r.get("baslik"))
+        for r in metin_rows
+    }
+except:
+    id_to_title = {}
+
+def format_metin(x):
+    title = id_to_title.get(x, "")
+    return f"{x} — {title}" if title else x
+
+selected_id = (
+    st.selectbox("Metin seç", metin_ids_all, format_func=format_metin)
+    if metin_ids_all
+    else st.text_input("Metin ID", "Metin_001")
+)
 
     if st.button("Başlayalım"):
         if not u or not selected_id:
@@ -1609,40 +1623,50 @@ elif st.session_state.phase == "questions":
             qa[i] = qa.get(i, 0) + 1
             st.session_state.question_attempts = qa
 
-        if secim == q.get("dogru"):
-            st.session_state.question_status[i] = "correct"
-            st.markdown(
-                "<div class='success-badge'>🎉 Harika! Doğru cevap verdin.</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.session_state.question_status[i] = "wrong"
-            st.markdown(
-                "<div class='warning-badge'>🙂 Bir daha düşün, istersen ipucu al.</div>",
-                unsafe_allow_html=True,
-            )
+     if secim == q.get("dogru"):
+    if i not in st.session_state.first_try_correct:
+        st.session_state.first_try_correct[i] = (i not in st.session_state.hint_used_questions)
 
-    if st.button("💡 İpucu", key=f"hint_btn_{i}"):
-        st.session_state.hints = st.session_state.get("hints", 0) + 1
+    st.session_state.question_status[i] = "correct"
 
-        speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
-        if speed_label == "yavaş":
-            hint_level = 3
-        elif speed_label == "orta":
-            hint_level = 2
-        else:
-            hint_level = 1
+    if i in st.session_state.hint_used_questions:
+        st.markdown(
+            "<div class='success-badge'>👏 Güzel! İpucunu kullanarak doğru cevabı buldun.</div>",
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            "<div class='success-badge'>🎉 Harika! Doğru cevap verdin.</div>",
+            unsafe_allow_html=True,
+        )
+else:
+    st.session_state.question_status[i] = "wrong"
+    st.markdown(
+        "<div class='warning-badge'>🙂 Bir daha düşün, istersen ipucu al.</div>",
+        unsafe_allow_html=True,
+    )
+  if st.button("💡 İpucu", key=f"hint_btn_{i}"):
+    st.session_state.hints = st.session_state.get("hints", 0) + 1
+    st.session_state.hint_used_questions.add(i)
 
-        try:
-            hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
-            st.session_state.ai_hint_text = hint
-            save_reading_process(
-                "HINT_USED",
-                f"Soru {i + 1} | Seçim: {secim or 'yok'}",
-                paragraf_no=None,
-            )
-        except Exception:
-            st.session_state.ai_hint_text = "Metne tekrar bak."
+    speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
+    if speed_label == "yavaş":
+        hint_level = 3
+    elif speed_label == "orta":
+        hint_level = 2
+    else:
+        hint_level = 1
+
+    try:
+        hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
+        st.session_state.ai_hint_text = hint
+        save_reading_process(
+            "HINT_USED",
+            f"Soru {i + 1} | Seçim: {secim or 'yok'}",
+            paragraf_no=None,
+        )
+    except Exception:
+        st.session_state.ai_hint_text = "Metne tekrar bak."
 
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
@@ -1695,7 +1719,14 @@ elif st.session_state.phase == "finalize":
         dogru = sum(1 for v in qstat.values() if v == "correct")
         yanlis = sum(1 for v in qstat.values() if v == "wrong")
         gecilen = sum(1 for v in qstat.values() if v == "skipped")
+        
+        dogrudan_dogru = sum(
+    1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is True
+)
 
+ipucuyla_dogru = sum(
+    1 for _, v in st.session_state.get("first_try_correct", {}).items() if v is False
+)
         sure = round((time.time() - st.session_state.start_t) / 60, 2)
         basari_yuzde = f"%{round((dogru / total_q) * 100, 1)}" if total_q else "%0"
 
@@ -1739,6 +1770,8 @@ elif st.session_state.phase == "finalize":
                 "dogru": dogru,
                 "yanlis": yanlis,
                 "gecilen": gecilen,
+                "dogrudan_dogru": dogrudan_dogru,
+                "ipucuyla_dogru": ipucuyla_dogru,
                 "total_q": total_q,
                 "sure_dk": sure,
                 "hints": int(st.session_state.get("hints", 0)),
@@ -1826,7 +1859,19 @@ elif st.session_state.phase == "done":
                 f"<div class='card'><b>İpucu</b><br/>{rep.get('hints', 0)}</div>",
                 unsafe_allow_html=True,
             )
+       c4, c5 = st.columns(2)
 
+      with c4:
+    st.markdown(
+        f"<div class='card'><b>Doğrudan Doğru</b><br/>{rep.get('dogrudan_dogru', 0)}</div>",
+        unsafe_allow_html=True,
+    )
+
+with c5:
+    st.markdown(
+        f"<div class='card'><b>İpucuyla Doğru</b><br/>{rep.get('ipucuyla_dogru', 0)}</div>",
+        unsafe_allow_html=True,
+    )
         if rep.get("important_note"):
             st.markdown(
                 f"<div class='card'><b>Metindeki En Önemli Şey</b><br/>{rep.get('important_note')}</div>",
