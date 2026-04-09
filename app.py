@@ -1561,13 +1561,15 @@ elif st.session_state.phase == "post":
 # =========================================================
 # 5) QUESTIONS
 # =========================================================
-# =========================================================
 # 5) QUESTIONS
 # =========================================================
 elif st.session_state.phase == "questions":
     top_back_button("post")
 
     st.subheader("Sorular")
+
+    if "ai_hint_text" not in st.session_state:
+        st.session_state.ai_hint_text = ""
 
     sorular = st.session_state.activity.get("sorular", [])
     total_q = len(sorular)
@@ -1587,12 +1589,34 @@ elif st.session_state.phase == "questions":
 
     q = sorular[i]
 
-    st.markdown(f"### Soru {i + 1} / {total_q}")
-    st.write(q.get("kok", ""))
+    if i == 0:
+        st.info("🚀 Başlıyoruz!")
+    elif i == total_q - 1:
+        st.info("⭐ Son sorudasın, harika gidiyorsun!")
+    else:
+        st.info("🌈 Devam et, çok iyi gidiyorsun!")
+
+    st.markdown(
+        f"""
+        <div class="question-box">
+            <div class="question-title">🌟 Soru {i + 1} / {total_q}</div>
+            <div class="fun-note">Dikkatli oku, en doğru cevabı bulabilirsin 💪</div>
+            <div style="font-size:20px; line-height:1.8;">{q.get("kok", "")}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    if st.button("📄 Metni Göster", key=f"show_text_{i}"):
+        st.write(metin)
+
+    saved = st.session_state.get(f"answer_{i}")
+    index = opts.index(saved) if saved in opts else None
 
     secim = st.radio(
         "Cevabını seç",
         opts,
+        index=index,
         key=f"radio_{i}",
         format_func=lambda x: f"{x}) {q.get(x, '')}"
     )
@@ -1613,38 +1637,81 @@ elif st.session_state.phase == "questions":
             st.session_state.question_status[i] = "correct"
 
             if i in st.session_state.hint_used_questions:
-                st.success("👏 İpucu kullanarak doğru yaptın!")
+                st.markdown(
+                    "<div class='success-badge'>👏 Güzel! İpucunu kullanarak doğru cevabı buldun.</div>",
+                    unsafe_allow_html=True,
+                )
             else:
-                st.success("🎉 Doğru!")
-
+                st.markdown(
+                    "<div class='success-badge'>🎉 Harika! Doğru cevap verdin.</div>",
+                    unsafe_allow_html=True,
+                )
         else:
             st.session_state.question_status[i] = "wrong"
-            st.warning("🙂 Tekrar dene ya da ipucu al")
+            st.markdown(
+                "<div class='warning-badge'>🙂 Bir daha düşün, istersen ipucu al.</div>",
+                unsafe_allow_html=True,
+            )
 
-    if st.button("💡 İpucu"):
-        st.session_state.hints += 1
+    if st.button("💡 İpucu", key=f"hint_btn_{i}"):
+        st.session_state.hints = st.session_state.get("hints", 0) + 1
         st.session_state.hint_used_questions.add(i)
 
+        speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
+        if speed_label == "yavaş":
+            hint_level = 3
+        elif speed_label == "orta":
+            hint_level = 2
+        else:
+            hint_level = 1
+
         try:
-            hint = generate_ai_hint(metin, q, secim or "", level=2)
-            st.info(hint)
-        except:
-            st.info("Metne tekrar bak.")
+            hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
+            st.session_state.ai_hint_text = hint
+            save_reading_process(
+                "HINT_USED",
+                f"Soru {i + 1} | Seçim: {secim or 'yok'}",
+                paragraf_no=None,
+            )
+        except Exception:
+            st.session_state.ai_hint_text = "Metne tekrar bak."
+
+    if st.session_state.get("ai_hint_text"):
+        st.info(st.session_state.ai_hint_text)
 
     col1, col2 = st.columns(2)
 
     with col1:
-        if st.button("⬅️ Geri") and i > 0:
+        if st.button("⬅️ Geri", key=f"back_q_{i}") and i > 0:
             st.session_state.q_idx -= 1
+            st.session_state.ai_hint_text = ""
             st.rerun()
 
     with col2:
-        if st.button("İleri ➡️") and i < total_q - 1:
-            st.session_state.q_idx += 1
-            st.rerun()
+        if st.button("İleri ➡️", key=f"next_q_{i}"):
+            if f"answer_{i}" not in st.session_state or not st.session_state.get(f"answer_{i}"):
+                st.session_state.question_status[i] = "skipped"
+
+            if i < total_q - 1:
+                st.session_state.q_idx += 1
+                st.session_state.ai_hint_text = ""
+                st.rerun()
+
+    unanswered = []
+    for idx in range(total_q):
+        if f"answer_{idx}" not in st.session_state or not st.session_state.get(f"answer_{idx}"):
+            unanswered.append(idx + 1)
+
+    if unanswered:
+        st.warning(f"Henüz boş bıraktığın sorular var: {', '.join(map(str, unanswered))}")
 
     if i == total_q - 1:
-        if st.button("Bitir"):
+        if st.button("Bitir", key="finish_questions"):
+            for idx in range(total_q):
+                if f"answer_{idx}" not in st.session_state or not st.session_state.get(f"answer_{idx}"):
+                    st.session_state.question_status[idx] = "skipped"
+
+            st.session_state.ai_hint_text = ""
             st.session_state.phase = "finalize"
             st.rerun()
 # =========================================================
