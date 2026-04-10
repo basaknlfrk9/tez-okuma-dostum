@@ -1666,8 +1666,8 @@ elif st.session_state.phase == "post":
                 st.success(f"AI Puan: {total}/12")
 
                 if total < 8:
-    zayif_alanlar = [k for k, v in scores.items() if v == 0]
-    kismi_alanlar = [k for k, v in scores.items() if v == 1]
+                    zayif_alanlar = [k for k, v in scores.items() if v == 0]
+                    kismi_alanlar = [k for k, v in scores.items() if v == 1]
 
     alan_adlari = {
         "kahraman": "kahraman",
