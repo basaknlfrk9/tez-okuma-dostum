@@ -1803,7 +1803,6 @@ elif st.session_state.phase == "finalize":
             if v in {"wrong", "skipped"}:
                 hatali.append(f"{idx + 1}:{v}")
         hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
-
         row = [
             st.session_state.get("session_id", ""),
             st.session_state.get("user", ""),
@@ -1816,18 +1815,44 @@ elif st.session_state.phase == "finalize":
             hatali_text,
             st.session_state.get("metin_id", ""),
             st.session_state.get("hints", 0),
-            "Evet",
-            "Evet",
-            0,
-            0,
-            st.session_state.get("prediction", ""),
+
+            # AnaFikirDogruMu
             "",
+
+            # CikarimDogruMu
+            "",
+
+            # TTS_Kullanim
+            1 if st.session_state.get("tts_count", 0) > 0 else 0,
+
+            # Mic_Kullanim
+            1 if (st.session_state.get("summary", "") or "").strip() else 0,
+
+            # Tahmin_Metin
+            st.session_state.get("prediction", ""),
+
+            # Dikkat_Onay
+            "Evet" if st.session_state.get("reading_speed", "") else "Hayır",
+
+            # Okuma_Hizi
             st.session_state.get("reading_speed", ""),
+
+            # Toplam_Tekrar
             st.session_state.get("repeat_count", 0),
+
+            # TTS_Sayisi
             st.session_state.get("tts_count", 0),
+
+            # Tekrar_Okuma_Sayisi
             st.session_state.get("reread_count", 0),
+
+            # Onemli_Not_Sayisi
             1 if (st.session_state.get("final_important_note", "") or "").strip() else 0,
+
+            # On_Bilgi_Var_Mi
             1 if (st.session_state.get("prior_knowledge", "") or "").strip() else 0,
+
+            # Yeni alanlar
             dogrudan_dogru,
             ipucuyla_dogru,
         ]
