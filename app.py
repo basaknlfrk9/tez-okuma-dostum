@@ -1665,10 +1665,7 @@ elif st.session_state.phase == "post":
 
                 st.success(f"AI Puan: {total}/12")
 
-                if total < 8:
-                    zayif_alanlar = [k for k, v in scores.items() if v == 0]
-                    kismi_alanlar = [k for k, v in scores.items() if v == 1]
-
+             if total < 8:
     alan_adlari = {
         "kahraman": "kahraman",
         "mekan": "mekân",
@@ -1678,16 +1675,21 @@ elif st.session_state.phase == "post":
         "cozum": "çözüm",
     }
 
+    zayif_alanlar = [k for k, v in scores.items() if v == 0]
+    kismi_alanlar = [k for k, v in scores.items() if v == 1]
+
     zayif_text = ", ".join(alan_adlari.get(x, x) for x in zayif_alanlar)
     kismi_text = ", ".join(alan_adlari.get(x, x) for x in kismi_alanlar)
 
     msg_parts = []
+
     if zayif_text:
         msg_parts.append(f"Eksik görünen bölümler: {zayif_text}")
-    if kismi_text:
-        msg_parts.append(f"Tekrar gözden geçirilebilecek bölümler: {kismi_text}")
 
-    st.warning(" | ".join(msg_parts) if msg_parts else "Bazı bölümler eksik ya da karışık olabilir.")
+    if kismi_text:
+        msg_parts.append(f"Geliştirilebilir bölümler: {kismi_text}")
+
+    st.warning(" | ".join(msg_parts) if msg_parts else "Bazı bölümler eksik olabilir.")
 
     if st.session_state.get("storymap_feedback"):
         st.info(f"🤖 {st.session_state.storymap_feedback}")
