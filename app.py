@@ -1530,6 +1530,8 @@ elif st.session_state.phase == "during":
 # =========================================================
 # 4) POST
 # =========================================================
+# 4) POST
+# =========================================================
 elif st.session_state.phase == "post":
     top_back_button("during")
 
@@ -1537,144 +1539,55 @@ elif st.session_state.phase == "post":
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
 
-    st.markdown("<div class='card'><b>Metni 2–3 cümleyle anlat.</b></div>", unsafe_allow_html=True)
-
-    voice_audio = st.audio_input("🎤 İstersen sesli anlat", key="summary_audio")
-    if voice_audio is not None:
-        st.audio(voice_audio)
-        if st.button("🎙️ Yazıya Çevir", key="transcribe_summary_btn"):
-            text = transcribe_audio_bytes(voice_audio.getvalue())
-            if text:
-                st.session_state.summary = text
-                st.session_state.voice_text = text
-                save_reading_process("VOICE_TO_TEXT", text, paragraf_no=None)
-                st.success("Sesin yazıya çevrildi.")
-            else:
-                st.warning("Ses şu anda yazıya çevrilemedi.")
-
-    if st.session_state.get("voice_text"):
-        st.info(f"📝 {st.session_state.voice_text}")
-
+    st.markdown("### Metni kısaca anlat")
     summ = st.text_area("Özetin", value=st.session_state.summary, height=120)
     st.session_state.summary = summ.strip()
-    maybe_log_once("summary_auto", "POST_SUMMARY_AUTO", st.session_state.summary, paragraf_no=None)
-
-    if st.session_state.summary and not st.session_state.get("summary_feedback_done", False):
-        try:
-            fb = generate_summary_feedback(metin, st.session_state.summary)
-            st.session_state.summary_feedback = fb
-            st.session_state.summary_feedback_done = True
-            save_reading_process("AI_SUMMARY_FEEDBACK", fb, paragraf_no=None)
-        except Exception:
-            st.session_state.summary_feedback = ""
-
-    if st.session_state.get("summary_feedback"):
-        st.info(f"🤖 {st.session_state.summary_feedback}")
-
-    st.divider()
-    st.markdown("<div class='card'><b>Okurken zorlandın mı?</b></div>", unsafe_allow_html=True)
-    difficulty = st.radio("Seç", ["Evet", "Hayır"], index=None, key="difficulty_radio_post")
-
-    st.session_state.reflection_has_difficulty = difficulty or ""
-    maybe_log_once("difficulty_auto", "POST_DIFFICULTY_AUTO", st.session_state.reflection_has_difficulty, paragraf_no=None)
-
-    if difficulty == "Evet":
-        st.markdown("<div class='card'><b>Zorlandığında ne yaptın?</b></div>", unsafe_allow_html=True)
-        r1 = st.text_input(
-            "Kısa yaz",
-            value=st.session_state.get("reflection_strategy", ""),
-            key="reflection_strategy_input",
-        )
-        st.session_state.reflection_strategy = (r1 or "").strip()
-        maybe_log_once(
-            "reflection_strategy_auto",
-            "POST_REFLECTION_STRATEGY_AUTO",
-            st.session_state.reflection_strategy,
-            paragraf_no=None,
-        )
-    else:
-        st.session_state.reflection_strategy = ""
-
-    st.markdown("<div class='card'><b>Okurken sana en çok ne yardımcı oldu?</b></div>", unsafe_allow_html=True)
-    r2 = st.text_input(
-        "Kısa yaz",
-        value=st.session_state.get("reflection_next_time", ""),
-        key="reflection_next_input",
-    )
-    st.session_state.reflection_next_time = (r2 or "").strip()
-    maybe_log_once(
-        "reflection_next_auto",
-        "POST_REFLECTION_NEXT_AUTO",
-        st.session_state.reflection_next_time,
-        paragraf_no=None,
-    )
 
     st.divider()
     st.subheader("Öykü Haritası")
 
-    templates = {
-        "kahraman": "Bu öyküde ... vardı.",
-        "mekan": "Olay ... yerinde geçti.",
-        "zaman": "Olay ... zamanında oldu.",
-        "problem": "Sorun şuydu: ...",
-        "olaylar": "Önce ... oldu. Sonra ... oldu.",
-        "cozum": "Sonunda ... oldu.",
-    }
-
     sm = st.session_state.story_map.copy()
 
-    sm["kahraman"] = st.text_input("👤 Kahraman", value=sm["kahraman"], placeholder=templates["kahraman"], key="story_kahraman")
-    sm["mekan"] = st.text_input("🏠 Mekân", value=sm["mekan"], placeholder=templates["mekan"], key="story_mekan")
-    sm["zaman"] = st.text_input("🕒 Zaman", value=sm["zaman"], placeholder=templates["zaman"], key="story_zaman")
-    sm["problem"] = st.text_input("⚠️ Problem", value=sm["problem"], placeholder=templates["problem"], key="story_problem")
-    sm["olaylar"] = st.text_area("🔁 Olaylar", value=sm["olaylar"], height=100, placeholder=templates["olaylar"], key="story_olaylar")
-    sm["cozum"] = st.text_input("✅ Çözüm", value=sm["cozum"], placeholder=templates["cozum"], key="story_cozum")
+    sm["kahraman"] = st.text_input("Kahraman", value=sm["kahraman"])
+    sm["mekan"] = st.text_input("Mekân", value=sm["mekan"])
+    sm["zaman"] = st.text_input("Zaman", value=sm["zaman"])
+    sm["problem"] = st.text_input("Problem", value=sm["problem"])
+    sm["olaylar"] = st.text_area("Olaylar", value=sm["olaylar"])
+    sm["cozum"] = st.text_input("Çözüm", value=sm["cozum"])
 
     st.session_state.story_map = sm
 
-    maybe_log_once("story_kahraman_auto", "STORY_KAHRAMAN_AUTO", sm["kahraman"], paragraf_no=None)
-    maybe_log_once("story_mekan_auto", "STORY_MEKAN_AUTO", sm["mekan"], paragraf_no=None)
-    maybe_log_once("story_zaman_auto", "STORY_ZAMAN_AUTO", sm["zaman"], paragraf_no=None)
-    maybe_log_once("story_problem_auto", "STORY_PROBLEM_AUTO", sm["problem"], paragraf_no=None)
-    maybe_log_once("story_olaylar_auto", "STORY_OLAYLAR_AUTO", sm["olaylar"], paragraf_no=None)
-    maybe_log_once("story_cozum_auto", "STORY_COZUM_AUTO", sm["cozum"], paragraf_no=None)
+    if st.button("Öykü Haritasını Puanla"):
+        filled = sum(1 for _, v in sm.items() if str(v).strip())
 
-  if st.button("Öykü Haritasını Puanla"):
-    filled = sum(1 for _, v in sm.items() if str(v).strip())
-    st.session_state.story_map_filled = filled
+        if filled < 3:
+            st.warning("En az 3 alan doldur.")
+        else:
+            with st.spinner("AI puanlıyor..."):
+                scores, total, reason = ai_score_story_map(metin, sm)
 
-    if filled < 3:
-        st.warning("En az 3 alan doldur.")
-    else:
-        with st.spinner("AI puanlıyor..."):
-            scores, total, reason = ai_score_story_map(metin, sm)
-
-        ok = save_story_map_row(sm, scores, total, reason)
-        if ok:
-            st.session_state.story_map_ai_scored = True
             st.session_state.story_map_last_total = total
             st.session_state.story_map_last_reason = reason
 
             try:
-                sm_fb = generate_storymap_feedback(metin, sm, scores)
-                st.session_state.storymap_feedback = sm_fb
-            except Exception:
+                fb = generate_storymap_feedback(metin, sm, scores)
+                st.session_state.storymap_feedback = fb
+            except:
                 st.session_state.storymap_feedback = ""
 
             st.success(f"AI Puan: {total}/12")
 
             if total < 8:
-                st.warning("Bazı bölümler eksik ya da karışık olabilir. Tekrar gözden geçir.")
+                st.warning("Bazı bölümler eksik ya da karışık olabilir.")
 
     if st.session_state.get("storymap_feedback"):
-        st.info(f"🤖 {st.session_state.storymap_feedback}")
+        st.info(st.session_state.storymap_feedback)
 
     st.divider()
+
     if st.button("Sorulara Geç"):
-        save_checkpoint("POST_TO_QUESTIONS")
         st.session_state.phase = "questions"
         st.rerun()
-
 
 # =========================================================
 # 5) QUESTIONS
