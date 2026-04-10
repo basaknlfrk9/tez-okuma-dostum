@@ -1833,6 +1833,7 @@ elif st.session_state.phase == "questions":
 
 
 # =========================================================
+# =========================================================
 # 6) FINALIZE
 # =========================================================
 elif st.session_state.phase == "finalize":
@@ -1861,7 +1862,8 @@ elif st.session_state.phase == "finalize":
             if v in {"wrong", "skipped"}:
                 hatali.append(f"{idx + 1}:{v}")
         hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
-                row = [
+
+        row = [
             st.session_state.get("session_id", ""),
             st.session_state.get("user", ""),
             st.session_state.get("login_time", ""),
@@ -1967,7 +1969,6 @@ elif st.session_state.phase == "finalize":
         st.session_state.saved_perf = True
         st.session_state.phase = "done"
         st.rerun()
-
 
 # =========================================================
 # 7) DONE
