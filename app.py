@@ -1639,34 +1639,32 @@ elif st.session_state.phase == "post":
     maybe_log_once("story_olaylar_auto", "STORY_OLAYLAR_AUTO", sm["olaylar"], paragraf_no=None)
     maybe_log_once("story_cozum_auto", "STORY_COZUM_AUTO", sm["cozum"], paragraf_no=None)
 
-    if st.button("Öykü Haritasını Puanla"):
-        filled = sum(1 for _, v in sm.items() if str(v).strip())
-        st.session_state.story_map_filled = filled
+  if st.button("Öykü Haritasını Puanla"):
+    filled = sum(1 for _, v in sm.items() if str(v).strip())
+    st.session_state.story_map_filled = filled
 
-        if filled < 3:
-            st.warning("En az 3 alan doldur.")
-        else:
-            with st.spinner("AI puanlıyor..."):
-                scores, total, reason = ai_score_story_map(metin, sm)
+    if filled < 3:
+        st.warning("En az 3 alan doldur.")
+    else:
+        with st.spinner("AI puanlıyor..."):
+            scores, total, reason = ai_score_story_map(metin, sm)
 
-            ok = save_story_map_row(sm, scores, total, reason)
-            if ok:
-                st.session_state.story_map_ai_scored = True
-                st.session_state.story_map_last_total = total
-                st.session_state.story_map_last_reason = reason
-                save_reading_process("STORY_MAP_SCORED", f"{total}/12 | {reason}", paragraf_no=None)
+        ok = save_story_map_row(sm, scores, total, reason)
+        if ok:
+            st.session_state.story_map_ai_scored = True
+            st.session_state.story_map_last_total = total
+            st.session_state.story_map_last_reason = reason
 
-                try:
-                    sm_fb = generate_storymap_feedback(metin, sm, scores)
-                    st.session_state.storymap_feedback = sm_fb
-                    save_reading_process("AI_STORYMAP_FEEDBACK", sm_fb, paragraf_no=None)
-                except Exception:
-                    st.session_state.storymap_feedback = ""
+            try:
+                sm_fb = generate_storymap_feedback(metin, sm, scores)
+                st.session_state.storymap_feedback = sm_fb
+            except Exception:
+                st.session_state.storymap_feedback = ""
 
-                st.success(f"AI Puan: {total}/12")
+            st.success(f"AI Puan: {total}/12")
 
-           if total < 8:
-    st.warning("Bazı bölümler eksik ya da karışık olabilir. Tekrar gözden geçir.")
+            if total < 8:
+                st.warning("Bazı bölümler eksik ya da karışık olabilir. Tekrar gözden geçir.")
 
     if st.session_state.get("storymap_feedback"):
         st.info(f"🤖 {st.session_state.storymap_feedback}")
