@@ -592,24 +592,39 @@ Kurallar:
     return resp.choices[0].message.content.strip()
 
 
-def generate_storymap_feedback(metin: str, sm: dict):
+def generate_storymap_feedback(metin: str, sm: dict, scores: dict = None):
     sys = """
-Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan bir öğretmensin.
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan sabırlı bir öğretmensin.
+
+Görevin:
+Öğrencinin hikâye haritası cevaplarına kısa, öğretici ve motive edici geri bildirim vermek.
 
 Kurallar:
 - Türkçe yaz.
-- Çok kısa yaz.
-- En fazla 3 kısa cümle kullan.
-- Öğrencinin doğru yaptığı bir şeyi söyle.
-- Sonra sadece 1 kısa öneri ver.
-- Cevabı doğrudan verme.
-- Nazik ve motive edici ol.
+- En fazla 4 kısa cümle yaz.
+- Önce öğrencinin doğru yaptığı en az 1 şeyi söyle.
+- Sonra sadece 1 veya 2 geliştirme önerisi ver.
+- Eğer olaylar karışık sıradaysa bunu nazikçe belirt.
+- Eğer bazı bölümler eksikse bunu kısa söyle.
+- Eğer yazım hataları varsa yargılamadan söyle:
+  "Bazı küçük yazım hataları var ama ne demek istediğin anlaşılıyor." gibi.
+- Asla sert konuşma.
+- Asla uzun açıklama yapma.
+- Asla doğru cevabı doğrudan verme.
+- Çocuğu tekrar düşünmeye yönlendir.
 """
+
     payload = {
-        "metin": (metin or "")[:2500],
+        "metin": (metin or "")[:3000],
         "story_map": sm,
+        "scores": scores or {},
     }
-    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.3)
+
+    resp = openai_text_request(
+        sys,
+        json.dumps(payload, ensure_ascii=False),
+        temperature=0.3
+    )
     return resp.choices[0].message.content.strip()
 
 
@@ -1627,7 +1642,7 @@ elif st.session_state.phase == "post":
                 save_reading_process("STORY_MAP_SCORED", f"{total}/12 | {reason}", paragraf_no=None)
 
                 try:
-                    sm_fb = generate_storymap_feedback(metin, sm)
+                    sm_fb = generate_storymap_feedback(metin, sm, scores)
                     st.session_state.storymap_feedback = sm_fb
                     save_reading_process("AI_STORYMAP_FEEDBACK", sm_fb, paragraf_no=None)
                 except Exception:
