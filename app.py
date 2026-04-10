@@ -846,7 +846,12 @@ def compute_metacog_signals():
 
 
 def rule_based_metacog_score(sig):
-    plan = 1 if sig["prediction_len"] >= 5 else 0
+    plan = 0
+    if sig["prediction_len"] >= 5:
+        plan += 1
+    if str(sig.get("speed", "")).strip():
+        plan += 1
+    plan = min(plan, 2)
 
     monitor = 0
     if (sig["reread_count"] + sig["tts_count"]) >= 1:
@@ -882,7 +887,6 @@ def rule_based_metacog_score(sig):
         "total": total,
         "reason": reason,
     }
-
 
 def save_metacog_rubric_row(scores: dict, reason: str, signals: dict):
     row = [
@@ -1216,7 +1220,6 @@ def save_story_map_row(sm: dict, scores: dict, total: int, reason: str):
 # =========================================================
 # STATE
 # =========================================================
-
 def reset_activity_states():
     st.session_state.saved_perf = False
     st.session_state.busy = False
@@ -1275,6 +1278,7 @@ def reset_activity_states():
     st.session_state.first_try_correct = {}
     st.session_state.hint_used_questions = set()
     st.session_state.last_snapshot_hash = ""
+    st.session_state.mic_used = False
 
 
 if "phase" not in st.session_state:
@@ -1541,31 +1545,78 @@ elif st.session_state.phase == "post":
 
     st.markdown("<div class='card'><b>Metni 2–3 cümleyle anlat.</b></div>", unsafe_allow_html=True)
 
-    # 🎤 SESLİ ÖZET (GERİ GELDİ)
     voice_audio = st.audio_input("🎤 İstersen sesli anlat", key="summary_audio")
 
     if voice_audio is not None:
         st.audio(voice_audio)
 
-        if st.button("🎙️ Yazıya Çevir"):
+        if st.button("🎙️ Yazıya Çevir", key="transcribe_summary_btn"):
             text = transcribe_audio_bytes(voice_audio.getvalue())
             if text:
                 st.session_state.summary = text
+                st.session_state.voice_text = text
+                st.session_state.mic_used = True
+                save_reading_process("VOICE_TO_TEXT", text, paragraf_no=None)
                 st.success("Sesin yazıya çevrildi.")
             else:
-                st.warning("Ses çevrilemedi.")
+                st.warning("Ses şu anda yazıya çevrilemedi.")
 
-    # ✍️ YAZILI ÖZET
+    if st.session_state.get("voice_text"):
+        st.info(f"📝 {st.session_state.voice_text}")
+
     summ = st.text_area("Özetin", value=st.session_state.summary, height=120)
     st.session_state.summary = summ.strip()
+    maybe_log_once("summary_auto", "POST_SUMMARY_AUTO", st.session_state.summary, paragraf_no=None)
 
-    # 🤖 ÖZET GERİ BİLDİRİM
-    if st.session_state.summary:
+    if st.session_state.summary and not st.session_state.get("summary_feedback_done", False):
         try:
             fb = generate_summary_feedback(metin, st.session_state.summary)
-            st.info(f"🤖 {fb}")
-        except:
-            pass
+            st.session_state.summary_feedback = fb
+            st.session_state.summary_feedback_done = True
+            save_reading_process("AI_SUMMARY_FEEDBACK", fb, paragraf_no=None)
+        except Exception:
+            st.session_state.summary_feedback = ""
+
+    if st.session_state.get("summary_feedback"):
+        st.info(f"🤖 {st.session_state.summary_feedback}")
+
+    st.divider()
+    st.markdown("<div class='card'><b>Okurken zorlandın mı?</b></div>", unsafe_allow_html=True)
+    difficulty = st.radio("Seç", ["Evet", "Hayır"], index=None, key="difficulty_radio_post")
+
+    st.session_state.reflection_has_difficulty = difficulty or ""
+    maybe_log_once("difficulty_auto", "POST_DIFFICULTY_AUTO", st.session_state.reflection_has_difficulty, paragraf_no=None)
+
+    if difficulty == "Evet":
+        st.markdown("<div class='card'><b>Zorlandığında ne yaptın?</b></div>", unsafe_allow_html=True)
+        r1 = st.text_input(
+            "Kısa yaz",
+            value=st.session_state.get("reflection_strategy", ""),
+            key="reflection_strategy_input",
+        )
+        st.session_state.reflection_strategy = (r1 or "").strip()
+        maybe_log_once(
+            "reflection_strategy_auto",
+            "POST_REFLECTION_STRATEGY_AUTO",
+            st.session_state.reflection_strategy,
+            paragraf_no=None,
+        )
+    else:
+        st.session_state.reflection_strategy = ""
+
+    st.markdown("<div class='card'><b>Okurken sana en çok ne yardımcı oldu?</b></div>", unsafe_allow_html=True)
+    r2 = st.text_input(
+        "Kısa yaz",
+        value=st.session_state.get("reflection_next_time", ""),
+        key="reflection_next_input",
+    )
+    st.session_state.reflection_next_time = (r2 or "").strip()
+    maybe_log_once(
+        "reflection_next_auto",
+        "POST_REFLECTION_NEXT_AUTO",
+        st.session_state.reflection_next_time,
+        paragraf_no=None,
+    )
 
     st.divider()
     st.subheader("Öykü Haritası")
@@ -1581,9 +1632,9 @@ elif st.session_state.phase == "post":
 
     st.session_state.story_map = sm
 
-    # ⭐ PUANLAMA (TEMİZ VE ÇALIŞAN)
     if st.button("Öykü Haritasını Puanla"):
         filled = sum(1 for _, v in sm.items() if str(v).strip())
+        st.session_state.story_map_filled = filled
 
         if filled < 3:
             st.warning("En az 3 alan doldur.")
@@ -1591,19 +1642,25 @@ elif st.session_state.phase == "post":
             with st.spinner("AI puanlıyor..."):
                 scores, total, reason = ai_score_story_map(metin, sm)
 
-            st.session_state.story_map_last_total = total
-            st.session_state.story_map_last_reason = reason
+            ok = save_story_map_row(sm, scores, total, reason)
 
-            try:
-                fb = generate_storymap_feedback(metin, sm, scores)
-                st.session_state.storymap_feedback = fb
-            except:
-                st.session_state.storymap_feedback = ""
+            if ok:
+                st.session_state.story_map_ai_scored = True
+                st.session_state.story_map_last_total = total
+                st.session_state.story_map_last_reason = reason
+                save_reading_process("STORY_MAP_SCORED", f"{total}/12 | {reason}", paragraf_no=None)
 
-            st.success(f"AI Puan: {total}/12")
+                try:
+                    fb = generate_storymap_feedback(metin, sm, scores)
+                    st.session_state.storymap_feedback = fb
+                    save_reading_process("AI_STORYMAP_FEEDBACK", fb, paragraf_no=None)
+                except Exception:
+                    st.session_state.storymap_feedback = ""
 
-            if total < 8:
-                st.warning("Bazı bölümler eksik ya da karışık olabilir.")
+                st.success(f"AI Puan: {total}/12")
+
+                if total < 8:
+                    st.warning("Bazı bölümler eksik ya da karışık olabilir.")
 
     if st.session_state.get("storymap_feedback"):
         st.info(st.session_state.storymap_feedback)
@@ -1611,6 +1668,7 @@ elif st.session_state.phase == "post":
     st.divider()
 
     if st.button("Sorulara Geç"):
+        save_checkpoint("POST_TO_QUESTIONS")
         st.session_state.phase = "questions"
         st.rerun()
 # =========================================================
@@ -1803,7 +1861,7 @@ elif st.session_state.phase == "finalize":
             if v in {"wrong", "skipped"}:
                 hatali.append(f"{idx + 1}:{v}")
         hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
-        row = [
+                row = [
             st.session_state.get("session_id", ""),
             st.session_state.get("user", ""),
             st.session_state.get("login_time", ""),
@@ -1826,13 +1884,13 @@ elif st.session_state.phase == "finalize":
             1 if st.session_state.get("tts_count", 0) > 0 else 0,
 
             # Mic_Kullanim
-            1 if (st.session_state.get("summary", "") or "").strip() else 0,
+            1 if st.session_state.get("mic_used", False) else 0,
 
             # Tahmin_Metin
             st.session_state.get("prediction", ""),
 
             # Dikkat_Onay
-           "",
+            "",
 
             # Okuma_Hizi
             st.session_state.get("reading_speed", ""),
