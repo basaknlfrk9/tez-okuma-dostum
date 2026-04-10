@@ -593,37 +593,52 @@ Kurallar:
 
 
 def generate_storymap_feedback(metin: str, sm: dict, scores: dict = None):
+    scores = scores or {}
+
+    guclu_alanlar = [k for k, v in scores.items() if v == 2]
+    kismi_alanlar = [k for k, v in scores.items() if v == 1]
+    zayif_alanlar = [k for k, v in scores.items() if v == 0]
+
+    alan_adlari = {
+        "kahraman": "kahraman",
+        "mekan": "mekân",
+        "zaman": "zaman",
+        "problem": "problem",
+        "olaylar": "olaylar",
+        "cozum": "çözüm",
+    }
+
     sys = """
 Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan sabırlı bir öğretmensin.
 
 Görevin:
-Öğrencinin hikâye haritası cevaplarına kısa, öğretici ve motive edici geri bildirim vermek.
+Öğrencinin hikâye haritasına çok kısa ama daha net geri bildirim vermek.
 
 Kurallar:
 - Türkçe yaz.
 - En fazla 4 kısa cümle yaz.
-- Önce öğrencinin doğru yaptığı en az 1 şeyi söyle.
-- Sonra sadece 1 veya 2 geliştirme önerisi ver.
-- Eğer olaylar karışık sıradaysa bunu nazikçe belirt.
-- Eğer bazı bölümler eksikse bunu kısa söyle.
-- Eğer yazım hataları varsa yargılamadan söyle:
-  "Bazı küçük yazım hataları var ama ne demek istediğin anlaşılıyor." gibi.
+- İlk cümlede öğrencinin güçlü olduğu 1 alanı söyle.
+- Sonra eksik veya karışık olan 1-2 alanı açıkça söyle.
+- Eğer olaylar karışık görünüyorsa "Önce ne oldu, sonra ne oldu?" diye yönlendir.
+- Eğer yazım hataları varsa yumuşak bir dille belirt.
 - Asla sert konuşma.
-- Asla uzun açıklama yapma.
 - Asla doğru cevabı doğrudan verme.
-- Çocuğu tekrar düşünmeye yönlendir.
+- Çok genel konuşma; verilen puan alanlarına dayan.
 """
 
     payload = {
         "metin": (metin or "")[:3000],
         "story_map": sm,
-        "scores": scores or {},
+        "scores": scores,
+        "guclu_alanlar": [alan_adlari.get(x, x) for x in guclu_alanlar],
+        "kismi_alanlar": [alan_adlari.get(x, x) for x in kismi_alanlar],
+        "zayif_alanlar": [alan_adlari.get(x, x) for x in zayif_alanlar],
     }
 
     resp = openai_text_request(
         sys,
         json.dumps(payload, ensure_ascii=False),
-        temperature=0.3
+        temperature=0.2
     )
     return resp.choices[0].message.content.strip()
 
@@ -1651,7 +1666,28 @@ elif st.session_state.phase == "post":
                 st.success(f"AI Puan: {total}/12")
 
                 if total < 8:
-                    st.warning("Bazı bölümler eksik ya da karışık olabilir. Tekrar gözden geçir.")
+    zayif_alanlar = [k for k, v in scores.items() if v == 0]
+    kismi_alanlar = [k for k, v in scores.items() if v == 1]
+
+    alan_adlari = {
+        "kahraman": "kahraman",
+        "mekan": "mekân",
+        "zaman": "zaman",
+        "problem": "problem",
+        "olaylar": "olaylar",
+        "cozum": "çözüm",
+    }
+
+    zayif_text = ", ".join(alan_adlari.get(x, x) for x in zayif_alanlar)
+    kismi_text = ", ".join(alan_adlari.get(x, x) for x in kismi_alanlar)
+
+    msg_parts = []
+    if zayif_text:
+        msg_parts.append(f"Eksik görünen bölümler: {zayif_text}")
+    if kismi_text:
+        msg_parts.append(f"Tekrar gözden geçirilebilecek bölümler: {kismi_text}")
+
+    st.warning(" | ".join(msg_parts) if msg_parts else "Bazı bölümler eksik ya da karışık olabilir.")
 
     if st.session_state.get("storymap_feedback"):
         st.info(f"🤖 {st.session_state.storymap_feedback}")
