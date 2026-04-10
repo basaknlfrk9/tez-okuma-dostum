@@ -1832,7 +1832,7 @@ elif st.session_state.phase == "finalize":
             st.session_state.get("prediction", ""),
 
             # Dikkat_Onay
-            "Evet" if st.session_state.get("reading_speed", "") else "Hayır",
+           "",
 
             # Okuma_Hizi
             st.session_state.get("reading_speed", ""),
