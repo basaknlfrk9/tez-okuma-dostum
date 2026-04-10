@@ -1539,24 +1539,49 @@ elif st.session_state.phase == "post":
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
 
-    st.markdown("### Metni kısaca anlat")
+    st.markdown("<div class='card'><b>Metni 2–3 cümleyle anlat.</b></div>", unsafe_allow_html=True)
+
+    # 🎤 SESLİ ÖZET (GERİ GELDİ)
+    voice_audio = st.audio_input("🎤 İstersen sesli anlat", key="summary_audio")
+
+    if voice_audio is not None:
+        st.audio(voice_audio)
+
+        if st.button("🎙️ Yazıya Çevir"):
+            text = transcribe_audio_bytes(voice_audio.getvalue())
+            if text:
+                st.session_state.summary = text
+                st.success("Sesin yazıya çevrildi.")
+            else:
+                st.warning("Ses çevrilemedi.")
+
+    # ✍️ YAZILI ÖZET
     summ = st.text_area("Özetin", value=st.session_state.summary, height=120)
     st.session_state.summary = summ.strip()
+
+    # 🤖 ÖZET GERİ BİLDİRİM
+    if st.session_state.summary:
+        try:
+            fb = generate_summary_feedback(metin, st.session_state.summary)
+            st.info(f"🤖 {fb}")
+        except:
+            pass
 
     st.divider()
     st.subheader("Öykü Haritası")
 
     sm = st.session_state.story_map.copy()
 
-    sm["kahraman"] = st.text_input("Kahraman", value=sm["kahraman"])
-    sm["mekan"] = st.text_input("Mekân", value=sm["mekan"])
-    sm["zaman"] = st.text_input("Zaman", value=sm["zaman"])
-    sm["problem"] = st.text_input("Problem", value=sm["problem"])
-    sm["olaylar"] = st.text_area("Olaylar", value=sm["olaylar"])
-    sm["cozum"] = st.text_input("Çözüm", value=sm["cozum"])
+    sm["kahraman"] = st.text_input("👤 Kahraman", value=sm["kahraman"])
+    sm["mekan"] = st.text_input("🏠 Mekân", value=sm["mekan"])
+    sm["zaman"] = st.text_input("🕒 Zaman", value=sm["zaman"])
+    sm["problem"] = st.text_input("⚠️ Problem", value=sm["problem"])
+    sm["olaylar"] = st.text_area("🔁 Olaylar", value=sm["olaylar"], height=100)
+    sm["cozum"] = st.text_input("✅ Çözüm", value=sm["cozum"])
 
     st.session_state.story_map = sm
 
+    # ⭐ PUANLAMA (TEMİZ VE ÇALIŞAN)
     if st.button("Öykü Haritasını Puanla"):
         filled = sum(1 for _, v in sm.items() if str(v).strip())
 
@@ -1588,7 +1613,6 @@ elif st.session_state.phase == "post":
     if st.button("Sorulara Geç"):
         st.session_state.phase = "questions"
         st.rerun()
-
 # =========================================================
 # 5) QUESTIONS
 # =========================================================
