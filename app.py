@@ -309,33 +309,20 @@ def split_text_into_sentences(text: str):
 
     return cleaned
 
-
-def build_sentence_blocks(sentences, min_sent=2, max_sent=3):
+def build_sentence_blocks_fixed(sentences, chunk_size=2):
     if not sentences:
         return []
 
     blocks = []
     i = 0
-    n = len(sentences)
 
-    while i < n:
-        remaining = n - i
+    while i < len(sentences):
+        block = " ".join(sentences[i:i + chunk_size]).strip()
+        if block:
+            blocks.append(block)
+        i += chunk_size
 
-        if remaining <= min_sent:
-            block = " ".join(sentences[i:])
-            blocks.append(block.strip())
-            break
-
-        take = max_sent
-
-        if remaining - take == 1:
-            take -= 1
-
-        block = " ".join(sentences[i:i + take])
-        blocks.append(block.strip())
-        i += take
-
-    return [b for b in blocks if b.strip()]
+    return blocks
 
 
 def split_paragraphs(text: str):
@@ -351,44 +338,31 @@ def split_paragraphs(text: str):
     if not sentences:
         return [clean_text]
 
-    return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
-
-
+    return build_sentence_blocks_fixed(sentences, chunk_size=2)
 def split_paragraphs_by_speed(text: str, speed: str):
     text = str(text or "").replace("\r", "\n").strip()
     if not text:
         return []
 
-    # Tüm satır sonlarını boşluğa çevir, böylece bozuk paragraf geçişleri ekrana taşınmaz
     clean_text = re.sub(r"\s*\n\s*", " ", text)
     clean_text = re.sub(r"\s+", " ", clean_text).strip()
 
     sentences = split_text_into_sentences(clean_text)
     speed = str(speed or "").strip().lower()
 
-    # YAVAŞ: 1-2 TAM cümle
+    if not sentences:
+        return [clean_text]
+
     if speed == "yavaş":
-        if sentences:
-            return build_sentence_blocks(sentences, min_sent=1, max_sent=2)
-        return [clean_text]
+        return build_sentence_blocks_fixed(sentences, chunk_size=1)
 
-    # ORTA: 2-3 TAM cümle
     if speed == "orta":
-        if sentences:
-            return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
-        return [clean_text]
+        return build_sentence_blocks_fixed(sentences, chunk_size=2)
 
-    # HIZLI: 3-4 TAM cümle
     if speed == "hızlı":
-        if sentences:
-            return build_sentence_blocks(sentences, min_sent=3, max_sent=4)
-        return [clean_text]
+        return build_sentence_blocks_fixed(sentences, chunk_size=4)
 
-    if sentences:
-        return build_sentence_blocks(sentences, min_sent=2, max_sent=3)
-
-    return [clean_text]
-
+    return build_sentence_blocks_fixed(sentences, chunk_size=2)
 
 def build_report_chart_bytes(rep: dict):
     try:
@@ -1277,6 +1251,7 @@ def reset_activity_states():
 
     st.session_state.first_try_correct = {}
     st.session_state.hint_used_questions = set()
+    st.session_state.forced_hint_questions = set()
     st.session_state.last_snapshot_hash = ""
     st.session_state.mic_used = False
 
@@ -1682,6 +1657,9 @@ elif st.session_state.phase == "questions":
     if "ai_hint_text" not in st.session_state:
         st.session_state.ai_hint_text = ""
 
+    if "forced_hint_questions" not in st.session_state:
+        st.session_state.forced_hint_questions = set()
+
     sorular = st.session_state.activity.get("sorular", [])
     total_q = len(sorular)
 
@@ -1732,42 +1710,81 @@ elif st.session_state.phase == "questions":
         format_func=lambda x: f"{x}) {q.get(x, '')}"
     )
 
+    attempts = st.session_state.get("question_attempts", {}).get(i, 0)
+    hint_used = i in st.session_state.get("hint_used_questions", set())
+    must_take_hint = i in st.session_state.get("forced_hint_questions", set())
+
+    if must_take_hint and not hint_used:
+        st.markdown(
+            "<div class='warning-badge'>Bu soruda tekrar seçim yapmadan önce ipucu almalısın.</div>",
+            unsafe_allow_html=True,
+        )
+
     if secim:
         previous = st.session_state.get(f"answer_{i}")
-        st.session_state[f"answer_{i}"] = secim
+        changed = previous != secim
 
-        if previous != secim:
+        if changed:
             qa = st.session_state.get("question_attempts", {})
             qa[i] = qa.get(i, 0) + 1
             st.session_state.question_attempts = qa
+            attempts = qa.get(i, 0)
+            st.session_state[f"answer_{i}"] = secim
             save_session_snapshot(force=True)
 
-        if secim == q.get("dogru"):
-            if i not in st.session_state.first_try_correct:
-                st.session_state.first_try_correct[i] = (i not in st.session_state.hint_used_questions)
-
-            st.session_state.question_status[i] = "correct"
-
-            if i in st.session_state.hint_used_questions:
-                st.markdown(
-                    "<div class='success-badge'>👏 Güzel! İpucunu kullanarak doğru cevabı buldun.</div>",
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    "<div class='success-badge'>🎉 Harika! Doğru cevap verdin.</div>",
-                    unsafe_allow_html=True,
-                )
-        else:
+        if must_take_hint and not hint_used:
             st.session_state.question_status[i] = "wrong"
             st.markdown(
-                "<div class='warning-badge'>🙂 Bir daha düşün, istersen ipucu al.</div>",
+                "<div class='warning-badge'>🙂 Önce ipucu al, sonra tekrar dene.</div>",
                 unsafe_allow_html=True,
             )
+        else:
+            if secim == q.get("dogru"):
+                if attempts <= 1 and not hint_used:
+                    st.session_state.first_try_correct[i] = True
+                    st.session_state.question_status[i] = "correct"
+                    st.markdown(
+                        "<div class='success-badge'>🎉 Harika! Doğru cevap verdin.</div>",
+                        unsafe_allow_html=True,
+                    )
+                elif hint_used:
+                    st.session_state.first_try_correct[i] = False
+                    st.session_state.question_status[i] = "correct"
+                    st.markdown(
+                        "<div class='success-badge'>👏 Güzel! İpucunu kullanarak doğru cevabı buldun.</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.session_state.first_try_correct[i] = False
+                    st.session_state.question_status[i] = "correct"
+                    st.markdown(
+                        "<div class='warning-badge'>Doğru cevabı buldun ama bu soru deneme-yanılma ile çözüldü.</div>",
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.session_state.question_status[i] = "wrong"
+                st.session_state.forced_hint_questions.add(i)
+
+                remaining_after_wrong = max(len(opts) - attempts, 0)
+
+                if remaining_after_wrong <= 1:
+                    st.markdown(
+                        "<div class='warning-badge'>Son seçeneğe kalıp doğruya gitmeyi önlemek için önce ipucu almalısın.</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        "<div class='warning-badge'>🙂 Bir daha düşün. Tekrar denemeden önce ipucu al.</div>",
+                        unsafe_allow_html=True,
+                    )
 
     if st.button("💡 İpucu", key=f"hint_btn_{i}"):
         st.session_state.hints = st.session_state.get("hints", 0) + 1
         st.session_state.hint_used_questions.add(i)
+
+        if i in st.session_state.forced_hint_questions:
+            st.session_state.forced_hint_questions.remove(i)
+
         save_session_snapshot(force=True)
 
         speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
