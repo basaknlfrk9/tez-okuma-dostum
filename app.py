@@ -1777,8 +1777,7 @@ elif st.session_state.phase == "questions":
                         "<div class='warning-badge'>🙂 Bir daha düşün. Tekrar denemeden önce ipucu al.</div>",
                         unsafe_allow_html=True,
                     )
-
-    if st.button("💡 İpucu", key=f"hint_btn_{i}"):
+if st.button("💡 İpucu", key=f"hint_btn_{i}"):
     st.session_state.hint_used_questions.add(i)
     st.session_state.hints = len(st.session_state.hint_used_questions)
 
@@ -1790,30 +1789,6 @@ elif st.session_state.phase == "questions":
         st.session_state.ai_hint_text = hint
     except Exception:
         st.session_state.ai_hint_text = "Metne tekrar bak."
-
-        if i in st.session_state.forced_hint_questions:
-            st.session_state.forced_hint_questions.remove(i)
-
-        save_session_snapshot(force=True)
-
-        speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
-        if speed_label == "yavaş":
-            hint_level = 3
-        elif speed_label == "orta":
-            hint_level = 2
-        else:
-            hint_level = 1
-
-        try:
-            hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
-            st.session_state.ai_hint_text = hint
-            save_reading_process(
-                "HINT_USED",
-                f"Soru {i + 1} | Seçim: {secim or 'yok'}",
-                paragraf_no=None,
-            )
-        except Exception:
-            st.session_state.ai_hint_text = "Metne tekrar bak."
 
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
