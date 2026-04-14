@@ -1848,7 +1848,6 @@ elif st.session_state.phase == "questions":
             st.session_state.phase = "finalize"
             st.rerun()
 
-
 # =========================================================
 # =========================================================
 # 6) FINALIZE
