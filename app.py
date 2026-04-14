@@ -1779,8 +1779,35 @@ elif st.session_state.phase == "questions":
                     )
 
     if st.button("💡 İpucu", key=f"hint_btn_{i}"):
-        st.session_state.hints = st.session_state.get("hints", 0) + 1
-        st.session_state.hint_used_questions.add(i)
+    once_var_mi = i in st.session_state.hint_used_questions
+    st.session_state.hint_used_questions.add(i)
+
+    if not once_var_mi:
+        st.session_state.hints = len(st.session_state.hint_used_questions)
+
+    if i in st.session_state.forced_hint_questions:
+        st.session_state.forced_hint_questions.remove(i)
+
+    save_session_snapshot(force=True)
+
+    speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
+    if speed_label == "yavaş":
+        hint_level = 3
+    elif speed_label == "orta":
+        hint_level = 2
+    else:
+        hint_level = 1
+
+    try:
+        hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
+        st.session_state.ai_hint_text = hint
+        save_reading_process(
+            "HINT_USED",
+            f"Soru {i + 1} | Seçim: {secim or 'yok'}",
+            paragraf_no=None,
+        )
+    except Exception:
+        st.session_state.ai_hint_text = "Metne tekrar bak."
 
         if i in st.session_state.forced_hint_questions:
             st.session_state.forced_hint_questions.remove(i)
