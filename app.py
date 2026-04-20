@@ -1710,7 +1710,7 @@ elif st.session_state.phase == "questions":
     )
 
     if "show_text_flags" not in st.session_state:
-    st.session_state.show_text_flags = {}
+        st.session_state.show_text_flags = {}
 
 if st.button("📄 Metni Göster / Gizle", key=f"show_text_{i}"):
     st.session_state.show_text_flags[i] = not st.session_state.show_text_flags.get(i, False)
