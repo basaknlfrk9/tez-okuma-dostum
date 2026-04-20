@@ -1224,6 +1224,7 @@ def reset_activity_states():
     st.session_state.story_map_filled = 0
 
     st.session_state.hint_level_by_q = {}
+    st.session_state.hint_clicks_by_q = {}
     st.session_state.question_attempts = {}
     st.session_state.show_text_in_questions = False
     st.session_state.show_text_button_after_hint = False
@@ -1780,28 +1781,45 @@ elif st.session_state.phase == "questions":
                 )
 
     if st.button("💡 İpucu", key=f"hint_btn_{i}"):
-        ilk_mi = i not in st.session_state.hint_used_questions
-        st.session_state.hint_used_questions.add(i)
+    # Bu soru için daha önce ipucu alındı mı?
+    ilk_mi = i not in st.session_state.hint_used_questions
 
-        if ilk_mi:
-            st.session_state.hints = len(st.session_state.hint_used_questions)
+    # Soru bazlı işaret
+    st.session_state.hint_used_questions.add(i)
 
-        if i in st.session_state.forced_hint_questions:
-            st.session_state.forced_hint_questions.remove(i)
+    # TOPLAM ipucu sayısı: her tıklamada artsın
+    st.session_state.hints = st.session_state.get("hints", 0) + 1
 
-        try:
-            speed_label = (st.session_state.get("reading_speed", "") or "").strip().lower()
-            if speed_label == "yavaş":
-                hint_level = 3
-            elif speed_label == "orta":
-                hint_level = 2
-            else:
-                hint_level = 1
+    # İstersen soru bazlı kaçıncı ipucu olduğunu da tut
+    hint_clicks_by_q = st.session_state.get("hint_clicks_by_q", {})
+    hint_clicks_by_q[i] = hint_clicks_by_q.get(i, 0) + 1
+    st.session_state.hint_clicks_by_q = hint_clicks_by_q
 
-            hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
-            st.session_state.ai_hint_text = hint
-        except Exception:
-            st.session_state.ai_hint_text = "Metne tekrar bak."
+    if i in st.session_state.forced_hint_questions:
+        st.session_state.forced_hint_questions.remove(i)
+
+    try:
+        # Aynı soruda 1., 2., 3. ipucunda giderek daha açık ipucu ver
+        q_hint_count = hint_clicks_by_q[i]
+        hint_level = min(q_hint_count, 3)
+
+        hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
+        st.session_state.ai_hint_text = hint
+
+        # Log kaydı
+        save_reading_process(
+            "AI_HINT",
+            f"Soru {i+1} | İpucu no: {q_hint_count} | İlk mi: {ilk_mi} | Metin: {hint}",
+            paragraf_no=None
+        )
+
+    except Exception:
+        st.session_state.ai_hint_text = "Metne tekrar bak."
+        save_reading_process(
+            "AI_HINT_ERROR",
+            f"Soru {i+1} için ipucu üretilemedi",
+            paragraf_no=None
+        )
 
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
