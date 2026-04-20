@@ -1709,8 +1709,14 @@ elif st.session_state.phase == "questions":
         unsafe_allow_html=True
     )
 
-    if st.button("📄 Metni Göster", key=f"show_text_{i}"):
-        st.write(metin)
+    if "show_text_flags" not in st.session_state:
+    st.session_state.show_text_flags = {}
+
+if st.button("📄 Metni Göster / Gizle", key=f"show_text_{i}"):
+    st.session_state.show_text_flags[i] = not st.session_state.show_text_flags.get(i, False)
+
+if st.session_state.show_text_flags.get(i, False):
+    st.write(metin)
 
     # Önceden kaydedilmiş cevap varsa onu göster, yoksa hiç seçim olmasın
     saved_answer = st.session_state.get(f"answer_{i}", None)
@@ -1780,33 +1786,26 @@ elif st.session_state.phase == "questions":
                     unsafe_allow_html=True,
                 )
 
-    if st.button("💡 İpucu", key=f"hint_btn_{i}"):
-    # Bu soru için daha önce ipucu alındı mı?
-        ilk_mi = i not in st.session_state.hint_used_questions
+if st.button("💡 İpucu", key=f"hint_btn_{i}"):
+    ilk_mi = i not in st.session_state.hint_used_questions
+    st.session_state.hint_used_questions.add(i)
 
-    # Soru bazlı işaret
-        st.session_state.hint_used_questions.add(i)
+    st.session_state.hints = st.session_state.get("hints", 0) + 1
 
-    # TOPLAM ipucu sayısı: her tıklamada artsın
-        st.session_state.hints = st.session_state.get("hints", 0) + 1
-
-    # İstersen soru bazlı kaçıncı ipucu olduğunu da tut
-        hint_clicks_by_q = st.session_state.get("hint_clicks_by_q", {})
-        hint_clicks_by_q[i] = hint_clicks_by_q.get(i, 0) + 1
-        st.session_state.hint_clicks_by_q = hint_clicks_by_q
+    hint_clicks_by_q = st.session_state.get("hint_clicks_by_q", {})
+    hint_clicks_by_q[i] = hint_clicks_by_q.get(i, 0) + 1
+    st.session_state.hint_clicks_by_q = hint_clicks_by_q
 
     if i in st.session_state.forced_hint_questions:
         st.session_state.forced_hint_questions.remove(i)
 
     try:
-        # Aynı soruda 1., 2., 3. ipucunda giderek daha açık ipucu ver
         q_hint_count = hint_clicks_by_q[i]
         hint_level = min(q_hint_count, 3)
 
         hint = generate_ai_hint(metin, q, secim or "", level=hint_level)
         st.session_state.ai_hint_text = hint
 
-        # Log kaydı
         save_reading_process(
             "AI_HINT",
             f"Soru {i+1} | İpucu no: {q_hint_count} | İlk mi: {ilk_mi} | Metin: {hint}",
@@ -1815,11 +1814,6 @@ elif st.session_state.phase == "questions":
 
     except Exception:
         st.session_state.ai_hint_text = "Metne tekrar bak."
-        save_reading_process(
-            "AI_HINT_ERROR",
-            f"Soru {i+1} için ipucu üretilemedi",
-            paragraf_no=None
-        )
 
     if st.session_state.get("ai_hint_text"):
         st.info(st.session_state.ai_hint_text)
