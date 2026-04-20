@@ -1684,6 +1684,14 @@ elif st.session_state.phase == "questions":
     opts = st.session_state.activity.get("opts") or ["A", "B", "C", "D"]
 
     i = st.session_state.get("q_idx", 0)
+    if "show_text_flags" not in st.session_state:
+        st.session_state.show_text_flags = {}
+
+if st.button("📄 Metni Göster / Gizle", key=f"show_text_{i}"):
+    st.session_state.show_text_flags[i] = not st.session_state.show_text_flags.get(i, False)
+
+if st.session_state.show_text_flags.get(i, False):
+    st.write(metin)
 
     if i >= total_q:
         i = total_q - 1
