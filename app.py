@@ -1782,18 +1782,18 @@ elif st.session_state.phase == "questions":
 
     if st.button("💡 İpucu", key=f"hint_btn_{i}"):
     # Bu soru için daha önce ipucu alındı mı?
-    ilk_mi = i not in st.session_state.hint_used_questions
+        ilk_mi = i not in st.session_state.hint_used_questions
 
     # Soru bazlı işaret
-    st.session_state.hint_used_questions.add(i)
+        st.session_state.hint_used_questions.add(i)
 
     # TOPLAM ipucu sayısı: her tıklamada artsın
-    st.session_state.hints = st.session_state.get("hints", 0) + 1
+        st.session_state.hints = st.session_state.get("hints", 0) + 1
 
     # İstersen soru bazlı kaçıncı ipucu olduğunu da tut
-    hint_clicks_by_q = st.session_state.get("hint_clicks_by_q", {})
-    hint_clicks_by_q[i] = hint_clicks_by_q.get(i, 0) + 1
-    st.session_state.hint_clicks_by_q = hint_clicks_by_q
+        hint_clicks_by_q = st.session_state.get("hint_clicks_by_q", {})
+        hint_clicks_by_q[i] = hint_clicks_by_q.get(i, 0) + 1
+        st.session_state.hint_clicks_by_q = hint_clicks_by_q
 
     if i in st.session_state.forced_hint_questions:
         st.session_state.forced_hint_questions.remove(i)
