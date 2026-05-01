@@ -1671,7 +1671,7 @@ elif st.session_state.phase == "questions":
     index = opts.index(saved) if saved in opts else None
 
     secim = st.radio("Seç", opts, index=index)
-
+    st.session_state[get_answer_key(i)] = secim
     if st.button("Kaydet"):
         st.session_state[get_answer_key(i)] = secim
 
