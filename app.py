@@ -1836,7 +1836,7 @@ def get_answer_key(i):
             st.rerun()
 
     with col2:
-    if st.button("İleri ➡️", key=f"next_q_{i}"):
+       if st.button("İleri ➡️", key=f"next_q_{i}"):
 
         if get_answer_key(i) not in st.session_state or not st.session_state.get(get_answer_key(i)):
             st.session_state.question_status[i] = "skipped"
