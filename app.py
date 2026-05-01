@@ -1888,7 +1888,7 @@ elif st.session_state.phase == "finalize":
             if v in {"wrong", "skipped"}:
                 hatali.append(f"{idx + 1}:{v}")
         hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
-        total_hints = sum(st.session_state.get("hint_clicks_by_q", {}).values())
+        total_hints = int(st.session_state.get("hints", 0))
         row = [
             st.session_state.get("session_id", ""),
             st.session_state.get("user", ""),
