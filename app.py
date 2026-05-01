@@ -1225,6 +1225,7 @@ def reset_activity_states():
 
     st.session_state.hint_level_by_q = {}
     st.session_state.hint_clicks_by_q = {}
+    st.session_state.hint_events = []
     st.session_state.question_attempts = {}
     st.session_state.show_text_in_questions = False
     st.session_state.show_text_button_after_hint = False
@@ -1666,6 +1667,8 @@ elif st.session_state.phase == "questions":
 
     if "hint_clicks_by_q" not in st.session_state:
         st.session_state.hint_clicks_by_q = {}
+    if "hint_events" not in st.session_state:
+        st.session_state.hint_events = []
 
     if "question_attempts" not in st.session_state:
         st.session_state.question_attempts = {}
@@ -1794,6 +1797,11 @@ elif st.session_state.phase == "questions":
         # Aynı soruda kaç kez ipucu alındığını tut
         st.session_state.hint_clicks_by_q[i] = st.session_state.hint_clicks_by_q.get(i, 0) + 1
         soru_ipucu_sayisi = st.session_state.hint_clicks_by_q[i]
+        st.session_state.hint_events.append({
+        "question": i + 1,
+        "hint_no": soru_ipucu_sayisi,
+        "time": now_tr()
+    })
 
         if i in st.session_state.forced_hint_questions:
             st.session_state.forced_hint_questions.remove(i)
@@ -1888,7 +1896,7 @@ elif st.session_state.phase == "finalize":
             if v in {"wrong", "skipped"}:
                 hatali.append(f"{idx + 1}:{v}")
         hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
-        total_hints = int(st.session_state.get("hints", 0))
+        total_hints = len(st.session_state.get("hint_events", []))
         row = [
             st.session_state.get("session_id", ""),
             st.session_state.get("user", ""),
