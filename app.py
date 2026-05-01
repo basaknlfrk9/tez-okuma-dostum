@@ -1683,9 +1683,9 @@ elif st.session_state.phase == "questions":
             st.rerun()
 
     with col2:
-    if st.button("İleri ➡️", key=f"next_q_{i}"):
+        if st.button("İleri ➡️", key=f"next_q_{i}"):
 
-        answer_key = f"answer_{st.session_state.get('session_id','')}_{i}"
+            answer_key = f"answer_{st.session_state.get('session_id','')}_{i}"
 
         if answer_key not in st.session_state or not st.session_state.get(answer_key):
             st.session_state.question_status[i] = "skipped"
