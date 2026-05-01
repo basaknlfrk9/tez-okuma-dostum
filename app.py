@@ -1784,6 +1784,7 @@ elif st.session_state.phase == "questions":
                 )
 
     if st.button("💡 İpucu", key=f"hint_btn_{i}"):
+        st.session_state.hint_clicks_by_q[i] = st.session_state.hint_clicks_by_q.get(i, 0) + 1
         ilk_mi = i not in st.session_state.hint_used_questions
         st.session_state.hint_used_questions.add(i)
 
