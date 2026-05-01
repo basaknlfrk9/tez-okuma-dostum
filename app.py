@@ -1654,7 +1654,11 @@ elif st.session_state.phase == "questions":
     top_back_button("post")
 
     st.subheader("Sorular")
-
+    
+user_session = st.session_state.get("session_id", "")
+def get_answer_key(i):
+    return f"answer_{user_session}_{i}"
+    
     if "ai_hint_text" not in st.session_state:
         st.session_state.ai_hint_text = ""
 
@@ -1716,7 +1720,7 @@ elif st.session_state.phase == "questions":
         st.write(metin)
 
     # Önceden kaydedilmiş cevap varsa onu göster, yoksa hiç seçim olmasın
-    saved_answer = st.session_state.get(f"answer_{i}", None)
+    saved_answer = st.session_state.get(get_answer_key(i), None)
     radio_index = opts.index(saved_answer) if saved_answer in opts else None
 
     secim = st.radio(
@@ -1744,14 +1748,14 @@ elif st.session_state.phase == "questions":
             st.warning("Önce ipucu alman gerekiyor.")
             st.session_state.question_status[i] = "wrong"
         else:
-            previous = st.session_state.get(f"answer_{i}")
+            previous = st.session_state.get(get_answer_key(i))
 
             if previous != secim:
                 qa = st.session_state.get("question_attempts", {})
                 qa[i] = qa.get(i, 0) + 1
                 st.session_state.question_attempts = qa
 
-            st.session_state[f"answer_{i}"] = secim
+            st.session_state[get_answer_key(i)] = secim
             attempts = st.session_state.get("question_attempts", {}).get(i, 1)
 
             if secim == q.get("dogru"):
@@ -1833,7 +1837,7 @@ elif st.session_state.phase == "questions":
 
     with col2:
         if st.button("İleri ➡️", key=f"next_q_{i}"):
-            if f"answer_{i}" not in st.session_state or not st.session_state.get(f"answer_{i}"):
+           if get_answer_key(i) not in st.session_state or not st.session_state.get(get_answer_key(i)):
                 st.session_state.question_status[i] = "skipped"
 
             if i < total_q - 1:
