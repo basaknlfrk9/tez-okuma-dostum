@@ -1772,36 +1772,36 @@ elif st.session_state.phase == "questions":
                 st.session_state.forced_hint_questions.add(i)
                 st.markdown("<div class='warning-badge'>Yanlış. Önce ipucu al.</div>", unsafe_allow_html=True)
 
-    if st.button("💡 İpucu", key=f"hint_btn_{i}"):
-        st.session_state.hints = st.session_state.get("hints", 0) + 1
-        st.session_state.hint_clicks_by_q[i] = st.session_state.hint_clicks_by_q.get(i, 0) + 1
+        if st.button("💡 İpucu", key=f"hint_btn_{i}"):
+            ilk_mi = i not in st.session_state.hint_used_questions
+            st.session_state.hint_used_questions.add(i)
 
-        hint = generate_ai_hint(metin, q, secim or "", level=1)
-        st.session_state.ai_hint_text = hint
+            st.session_state.hints = st.session_state.get("hints", 0) + 1
+            st.session_state.hint_clicks_by_q[i] = st.session_state.hint_clicks_by_q.get(i, 0) + 1
+            soru_ipucu_sayisi = st.session_state.hint_clicks_by_q[i]
 
-    if st.session_state.get("ai_hint_text"):
-        st.info(st.session_state.ai_hint_text)
+        if i in st.session_state.forced_hint_questions:
+            st.session_state.forced_hint_questions.remove(i)
 
-    col1, col2 = st.columns(2)
+        try:
+            hint = generate_ai_hint(metin, q, secim or "", level=1)
+            st.session_state.ai_hint_text = hint
 
-    with col1:
-        if st.button("⬅️ Geri", key=f"back_q_{i}") and i > 0:
-            st.session_state.q_idx -= 1
-            st.rerun()
+            save_reading_process(
+                "AI_HINT",
+                f"Soru {i+1} | İpucu no: {soru_ipucu_sayisi} | İlk mi: {ilk_mi} | {hint}",
+                paragraf_no=None
+            )
 
-    with col2:
-        if st.button("İleri ➡️", key=f"next_q_{i}"):
-            if answer_key not in st.session_state:
-                st.session_state.question_status[i] = "skipped"
+            save_session_snapshot(force=True)
 
-            if i < total_q - 1:
-                st.session_state.q_idx += 1
-                st.rerun()
-
-    if i == total_q - 1:
-        if st.button("Bitir"):
-            st.session_state.phase = "finalize"
-            st.rerun()
+        except Exception:
+            st.session_state.ai_hint_text = "Metne tekrar bak."
+            save_reading_process(
+                "AI_HINT_ERROR",
+                f"Soru {i+1} | İpucu alınamadı",
+                paragraf_no=None
+            )
 # 6) FINALIZE
 # =========================================================
 elif st.session_state.phase == "finalize":
