@@ -1887,7 +1887,7 @@ elif st.session_state.phase == "finalize":
             if v in {"wrong", "skipped"}:
                 hatali.append(f"{idx + 1}:{v}")
         hatali_text = ", ".join(hatali) if hatali else "Hepsi doğru"
-
+        total_hints = sum(st.session_state.get("hint_clicks_by_q", {}).values())
         row = [
             st.session_state.get("session_id", ""),
             st.session_state.get("user", ""),
@@ -1899,8 +1899,7 @@ elif st.session_state.phase == "finalize":
             dogru,
             hatali_text,
             st.session_state.get("metin_id", ""),
-            st.session_state.get("hints", 0),
-
+            total_hints,
             # AnaFikirDogruMu
             "",
 
@@ -1953,7 +1952,7 @@ elif st.session_state.phase == "finalize":
             "ipucuyla_dogru": ipucuyla_dogru,
             "total_q": total_q,
             "sure_dk": sure,
-            "hints": int(st.session_state.get("hints", 0)),
+            "hints": int(total_hints),
             "prediction": (st.session_state.get("prediction", "") or "").strip(),
             "speed": st.session_state.get("reading_speed", ""),
             "repeat_count": int(st.session_state.get("repeat_count", 0)),
