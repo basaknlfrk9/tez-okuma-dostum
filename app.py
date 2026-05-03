@@ -1364,6 +1364,7 @@ if st.session_state.phase == "auth":
 
             st.session_state.phase = "pre"
             st.rerun()
+# =========================================================
 # 2) PRE
 # =========================================================
 elif st.session_state.phase == "pre":
@@ -1379,35 +1380,30 @@ elif st.session_state.phase == "pre":
             unsafe_allow_html=True,
         )
 
-prediction_key = f"prediction_input_{st.session_state.get('session_id', '')}"
+    prediction_key = f"prediction_input_{st.session_state.get('session_id', '')}"
 
-if prediction_key not in st.session_state:
-    st.session_state[prediction_key] = ""
+    if prediction_key not in st.session_state:
+        st.session_state[prediction_key] = ""
 
-prediction_key = f"prediction_input_{st.session_state.get('session_id', '')}"
+    curiosity = st.text_input(
+        "Sence bu metin ne hakkında olabilir?",
+        key=prediction_key,
+        placeholder="Cevabını buraya yaz",
+    )
 
-if prediction_key not in st.session_state:
-    st.session_state[prediction_key] = ""
+    st.session_state.prediction = curiosity.strip()
 
-curiosity = st.text_input(
-    "Sence bu metin ne hakkında olabilir?",
-    key=prediction_key,
-    placeholder="Cevabını buraya yaz",
-)
+    speed = st.radio(
+        "Okuma hızını seç",
+        ["Yavaş", "Orta", "Hızlı"],
+        index=None,
+        key="reading_speed_radio_pre",
+    )
 
-st.session_state.prediction = curiosity.strip()
+    st.session_state.reading_speed = speed if speed else ""
 
-speed = st.radio(
-    "Okuma hızını seç",
-    ["Yavaş", "Orta", "Hızlı"],
-    index=None,
-    key="reading_speed_radio_pre",
-)
-
-st.session_state.reading_speed = speed if speed else ""
-
-maybe_log_once("pre_prediction", "PRE_PREDICTION_AUTO", st.session_state.prediction, paragraf_no=None)
-maybe_log_once("pre_speed", "PRE_SPEED_AUTO", st.session_state.reading_speed, paragraf_no=None)
+    maybe_log_once("pre_prediction", "PRE_PREDICTION_AUTO", st.session_state.prediction, paragraf_no=None)
+    maybe_log_once("pre_speed", "PRE_SPEED_AUTO", st.session_state.reading_speed, paragraf_no=None)
 
     if st.button("Metne Geç"):
         if not st.session_state.reading_speed:
@@ -1422,9 +1418,6 @@ maybe_log_once("pre_speed", "PRE_SPEED_AUTO", st.session_state.reading_speed, pa
             save_checkpoint("PRE_TO_DURING")
             st.session_state.phase = "during"
             st.rerun()
-
-
-# =========================================================
 # 3) DURING
 # =========================================================
 elif st.session_state.phase == "during":
