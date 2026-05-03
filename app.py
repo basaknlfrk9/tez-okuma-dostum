@@ -1549,7 +1549,7 @@ elif st.session_state.phase == "post":
     st.subheader("Okuma Sonrası")
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
-
+    sid = st.session_state.get("session_id", "")
     st.markdown("<div class='card'><b>Metni 2–3 cümleyle anlat.</b></div>", unsafe_allow_html=True)
 
     voice_audio = st.audio_input("🎤 İstersen sesli anlat", key="summary_audio")
