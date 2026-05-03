@@ -1465,7 +1465,7 @@ elif st.session_state.phase == "during":
 
     st.markdown(f"<div class='highlight-box'>{parts[p_idx]}</div>", unsafe_allow_html=True)
 
-    nav1, nav2 = st.columns(2)
+        nav1, nav2 = st.columns(2)
     with nav1:
         if st.button("⬅️ Önceki Bölüm", disabled=(p_idx == 0)):
             st.session_state.p_idx = max(0, p_idx - 1)
@@ -1479,12 +1479,12 @@ elif st.session_state.phase == "during":
                 save_session_snapshot(force=True)
                 st.rerun()
 
-   if p_idx == total_parts - 1:
-    st.markdown("<div class='mini-success'>Metnin son bölümüne geldin.</div>", unsafe_allow_html=True)
+    if p_idx == total_parts - 1:
+        st.markdown("<div class='mini-success'>Metnin son bölümüne geldin.</div>", unsafe_allow_html=True)
 
-    sid = st.session_state.get("session_id", "")
+        sid = st.session_state.get("session_id", "")
 
-    # EN ÖNEMLİ ŞEY
+        # EN ÖNEMLİ ŞEY
     st.markdown("<div class='card'><b>Metindeki en önemli şey neydi?</b></div>", unsafe_allow_html=True)
 
     final_note = st.text_area(
