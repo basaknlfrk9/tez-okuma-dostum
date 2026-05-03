@@ -1330,7 +1330,7 @@ if st.session_state.phase == "auth":
         else st.text_input("Metin ID", "Metin_001")
     )
 
-  if st.button("Başlayalım"):
+    if st.button("Başlayalım"):
     if not u or not selected_id:
         st.warning("Lütfen öğrenci kodunu yaz ve bir metin seç.")
     else:
