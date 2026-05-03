@@ -1385,11 +1385,12 @@ elif st.session_state.phase == "pre":
     if prediction_key not in st.session_state:
         st.session_state[prediction_key] = ""
 
-    curiosity = st.text_input(
-        "Sence bu metin ne hakkında olabilir?",
-        key=prediction_key,
-        placeholder="Cevabını buraya yaz",
-    )
+   curiosity = st.text_area(
+    "Sence bu metin ne hakkında olabilir?",
+    key=prediction_key,
+    placeholder="Cevabını buraya yaz",
+    height=80,
+)
 
     st.session_state.prediction = curiosity.strip()
 
