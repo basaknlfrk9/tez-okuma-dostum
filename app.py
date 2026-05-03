@@ -1406,8 +1406,8 @@ speed = st.radio(
 
 st.session_state.reading_speed = speed if speed else ""
 
-    maybe_log_once("pre_prediction", "PRE_PREDICTION_AUTO", st.session_state.prediction, paragraf_no=None)
-    maybe_log_once("pre_speed", "PRE_SPEED_AUTO", st.session_state.reading_speed, paragraf_no=None)
+maybe_log_once("pre_prediction", "PRE_PREDICTION_AUTO", st.session_state.prediction, paragraf_no=None)
+maybe_log_once("pre_speed", "PRE_SPEED_AUTO", st.session_state.reading_speed, paragraf_no=None)
 
     if st.button("Metne Geç"):
         if not st.session_state.reading_speed:
