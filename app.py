@@ -1365,6 +1365,7 @@ if st.session_state.phase == "auth":
             st.session_state.phase = "pre"
             st.rerun()
 # =========================================================
+# =========================================================
 # 2) PRE
 # =========================================================
 elif st.session_state.phase == "pre":
@@ -1380,17 +1381,17 @@ elif st.session_state.phase == "pre":
             unsafe_allow_html=True,
         )
 
-    prediction_key = f"prediction_input_{st.session_state.get('session_id', '')}"
+    prediction_key = f"prediction_area_{st.session_state.get('session_id', '')}"
 
     if prediction_key not in st.session_state:
         st.session_state[prediction_key] = ""
 
-   curiosity = st.text_area(
-    "Sence bu metin ne hakkında olabilir?",
-    key=prediction_key,
-    placeholder="Cevabını buraya yaz",
-    height=80,
-)
+    curiosity = st.text_area(
+        "Sence bu metin ne hakkında olabilir?",
+        key=prediction_key,
+        placeholder="Cevabını buraya yaz",
+        height=80,
+    )
 
     st.session_state.prediction = curiosity.strip()
 
