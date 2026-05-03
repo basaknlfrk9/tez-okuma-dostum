@@ -1303,8 +1303,14 @@ if st.session_state.phase == "auth":
         st.markdown("<div class='info-pill'>❓ Soruları çözeceksin</div>", unsafe_allow_html=True)
         st.markdown("<div class='info-pill'>🗺️ Öykü haritası oluşturacaksın</div>", unsafe_allow_html=True)
 
-    u = st.text_input("Öğrenci Kodun")
+    login_key = f"student_code_{uuid.uuid4().hex[:8]}"
 
+    u = st.text_area(
+        "Öğrenci Kodun",
+        key=login_key,
+        placeholder="Öğrenci kodunu yaz",
+        height=70,
+)
     try:
         metin_ids_all = list_metin_ids()
     except Exception:
