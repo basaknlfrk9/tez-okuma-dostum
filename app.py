@@ -1483,7 +1483,12 @@ elif st.session_state.phase == "during":
         st.markdown("<div class='mini-success'>Metnin son bölümüne geldin.</div>", unsafe_allow_html=True)
 
         st.markdown("<div class='card'><b>Metindeki en önemli şey neydi?</b></div>", unsafe_allow_html=True)
-        final_note = st.text_input("Kısa yaz", value=st.session_state.final_important_note)
+        final_note = st.text_area(
+            "Kısa yaz",
+             key=f"final_note_area_{st.session_state.get('session_id', '')}",
+             placeholder="Cevabını buraya yaz",
+             height=80,
+)
         st.session_state.final_important_note = final_note
         maybe_log_once("important_note_auto", "IMPORTANT_NOTE_FINAL_AUTO", final_note.strip(), paragraf_no=None)
 
@@ -1493,12 +1498,12 @@ elif st.session_state.phase == "during":
         maybe_log_once("prior_knowledge_auto", "PRIOR_KNOWLEDGE_AUTO", pk.strip(), paragraf_no=None)
 
         st.markdown("<div class='card'><b>Bilmediğin kelime var mı?</b></div>", unsafe_allow_html=True)
-        unknown_word = st.text_input(
+      unknown_word = st.text_area(
             "Kelime",
-            value="",
-            key="unknown_word_input_end",
-            placeholder="Örneğin: cesaret",
-        )
+             key=f"unknown_word_area_{st.session_state.get('session_id', '')}",
+             placeholder="Örneğin: cesaret",
+             height=70,
+)
 
         if st.button("Kelimeyi Açıkla", key="word_help_btn_end") and unknown_word.strip():
             try:
@@ -1610,12 +1615,14 @@ elif st.session_state.phase == "post":
 
     sm = st.session_state.story_map.copy()
 
-    sm["kahraman"] = st.text_input("👤 Kahraman", value=sm["kahraman"])
-    sm["mekan"] = st.text_input("🏠 Mekân", value=sm["mekan"])
-    sm["zaman"] = st.text_input("🕒 Zaman", value=sm["zaman"])
-    sm["problem"] = st.text_input("⚠️ Problem", value=sm["problem"])
-    sm["olaylar"] = st.text_area("🔁 Olaylar", value=sm["olaylar"], height=100)
-    sm["cozum"] = st.text_input("✅ Çözüm", value=sm["cozum"])
+    sid = st.session_state.get("session_id", "")
+
+    sm["kahraman"] = st.text_area("👤 Kahraman", key=f"story_kahraman_{sid}", height=70)
+    sm["mekan"] = st.text_area("🏠 Mekân", key=f"story_mekan_{sid}", height=70)
+    sm["zaman"] = st.text_area("🕒 Zaman", key=f"story_zaman_{sid}", height=70)
+    sm["problem"] = st.text_area("⚠️ Problem", key=f"story_problem_{sid}", height=70)
+    sm["olaylar"] = st.text_area("🔁 Olaylar", key=f"story_olaylar_{sid}", height=100)
+    sm["cozum"] = st.text_area("✅ Çözüm", key=f"story_cozum_{sid}", height=70)
 
     st.session_state.story_map = sm
 
