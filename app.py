@@ -1379,20 +1379,32 @@ elif st.session_state.phase == "pre":
             unsafe_allow_html=True,
         )
 
-    curiosity = st.text_input(
-        "Sence bu metin ne hakkında olabilir?",
-        value=st.session_state.prediction,
-    )
+prediction_key = f"prediction_input_{st.session_state.get('session_id', '')}"
 
-    speed = st.radio(
-        "Okuma hızını seç",
-        ["Yavaş", "Orta", "Hızlı"],
-        index=None,
-        key="reading_speed_radio_pre",
-    )
+if prediction_key not in st.session_state:
+    st.session_state[prediction_key] = ""
 
-    st.session_state.prediction = curiosity.strip()
-    st.session_state.reading_speed = speed if speed else ""
+prediction_key = f"prediction_input_{st.session_state.get('session_id', '')}"
+
+if prediction_key not in st.session_state:
+    st.session_state[prediction_key] = ""
+
+curiosity = st.text_input(
+    "Sence bu metin ne hakkında olabilir?",
+    key=prediction_key,
+    placeholder="Cevabını buraya yaz",
+)
+
+st.session_state.prediction = curiosity.strip()
+
+speed = st.radio(
+    "Okuma hızını seç",
+    ["Yavaş", "Orta", "Hızlı"],
+    index=None,
+    key="reading_speed_radio_pre",
+)
+
+st.session_state.reading_speed = speed if speed else ""
 
     maybe_log_once("pre_prediction", "PRE_PREDICTION_AUTO", st.session_state.prediction, paragraf_no=None)
     maybe_log_once("pre_speed", "PRE_SPEED_AUTO", st.session_state.reading_speed, paragraf_no=None)
