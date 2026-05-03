@@ -1420,6 +1420,7 @@ elif st.session_state.phase == "pre":
             save_checkpoint("PRE_TO_DURING")
             st.session_state.phase = "during"
             st.rerun()
+# =========================================================
 # 3) DURING
 # =========================================================
 elif st.session_state.phase == "during":
@@ -1465,7 +1466,7 @@ elif st.session_state.phase == "during":
 
     st.markdown(f"<div class='highlight-box'>{parts[p_idx]}</div>", unsafe_allow_html=True)
 
-        nav1, nav2 = st.columns(2)
+    nav1, nav2 = st.columns(2)
     with nav1:
         if st.button("⬅️ Önceki Bölüm", disabled=(p_idx == 0)):
             st.session_state.p_idx = max(0, p_idx - 1)
@@ -1485,72 +1486,61 @@ elif st.session_state.phase == "during":
         sid = st.session_state.get("session_id", "")
 
         # EN ÖNEMLİ ŞEY
-    st.markdown("<div class='card'><b>Metindeki en önemli şey neydi?</b></div>", unsafe_allow_html=True)
+        st.markdown("<div class='card'><b>Metindeki en önemli şey neydi?</b></div>", unsafe_allow_html=True)
+        final_note = st.text_area(
+            "Kısa yaz",
+            key=f"final_note_area_{sid}",
+            placeholder="Cevabını buraya yaz",
+            height=80,
+        )
+        st.session_state.final_important_note = final_note
+        maybe_log_once(
+            "important_note_auto",
+            "IMPORTANT_NOTE_FINAL_AUTO",
+            final_note.strip(),
+            paragraf_no=None,
+        )
 
-    final_note = st.text_area(
-        "Kısa yaz",
-        key=f"final_note_area_{sid}",
-        placeholder="Cevabını buraya yaz",
-        height=80,
-    )
+        # ÖN BİLGİ
+        st.markdown("<div class='card'><b>Bu metin sana daha önce bildiğin bir şeyi hatırlattı mı?</b></div>", unsafe_allow_html=True)
+        pk = st.text_area(
+            "Varsa yaz",
+            key=f"prior_knowledge_area_{sid}",
+            height=90,
+        )
+        st.session_state.prior_knowledge = pk.strip()
+        maybe_log_once(
+            "prior_knowledge_auto",
+            "PRIOR_KNOWLEDGE_AUTO",
+            pk.strip(),
+            paragraf_no=None,
+        )
 
-    st.session_state.final_important_note = final_note
+        # KELİME
+        st.markdown("<div class='card'><b>Bilmediğin kelime var mı?</b></div>", unsafe_allow_html=True)
+        unknown_word = st.text_area(
+            "Kelime",
+            key=f"unknown_word_area_{sid}",
+            placeholder="Örneğin: cesaret",
+            height=70,
+        )
 
-    maybe_log_once(
-        "important_note_auto",
-        "IMPORTANT_NOTE_FINAL_AUTO",
-        final_note.strip(),
-        paragraf_no=None,
-    )
+        if st.button("Kelimeyi Açıkla", key="word_help_btn_end") and unknown_word.strip():
+            try:
+                ans = explain_word_simple(unknown_word.strip(), metin)
+                st.session_state.last_word_help = unknown_word.strip()
+                st.session_state.word_help_answer = ans
+                save_reading_process("WORD_HELP", f"{unknown_word.strip()} | {ans}", paragraf_no=None)
+            except Exception:
+                st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
 
-    # ÖN BİLGİ
-    st.markdown("<div class='card'><b>Bu metin sana daha önce bildiğin bir şeyi hatırlattı mı?</b></div>", unsafe_allow_html=True)
+        if st.session_state.get("word_help_answer"):
+            st.info(f"{st.session_state.get('last_word_help', 'Kelime')}: {st.session_state.word_help_answer}")
 
-    pk = st.text_area(
-        "Varsa yaz",
-        key=f"prior_knowledge_area_{sid}",
-        height=90,
-    )
-
-    st.session_state.prior_knowledge = pk.strip()
-
-    maybe_log_once(
-        "prior_knowledge_auto",
-        "PRIOR_KNOWLEDGE_AUTO",
-        pk.strip(),
-        paragraf_no=None,
-    )
-
-    # KELİME
-    st.markdown("<div class='card'><b>Bilmediğin kelime var mı?</b></div>", unsafe_allow_html=True)
-
-    unknown_word = st.text_area(
-        "Kelime",
-        key=f"unknown_word_area_{sid}",
-        placeholder="Örneğin: cesaret",
-        height=70,
-    )
-
-    if st.button("Kelimeyi Açıkla", key="word_help_btn_end") and unknown_word.strip():
-        try:
-            ans = explain_word_simple(unknown_word.strip(), metin)
-            st.session_state.last_word_help = unknown_word.strip()
-            st.session_state.word_help_answer = ans
-            save_reading_process("WORD_HELP", f"{unknown_word.strip()} | {ans}", paragraf_no=None)
-        except Exception:
-            st.session_state.word_help_answer = "Bu kelimeyi şu an açıklayamadım."
-
-    if st.session_state.get("word_help_answer"):
-        st.info(f"{st.session_state.get('last_word_help', 'Kelime')}: {st.session_state.word_help_answer}")
-
-    if st.button("Devam Et"):
-        save_checkpoint("DURING_TO_POST")
-        st.session_state.phase = "post"
-        st.rerun()
-
-# =========================================================
-# 4) POST
-# =========================================================
+        if st.button("Devam Et"):
+            save_checkpoint("DURING_TO_POST")
+            st.session_state.phase = "post"
+            st.rerun()
 # 4) POST
 # =========================================================
 elif st.session_state.phase == "post":
