@@ -1276,6 +1276,7 @@ if st.session_state.phase != "auth":
 
 
 # =========================================================
+# =========================================================
 # 1) AUTH
 # =========================================================
 if st.session_state.phase == "auth":
@@ -1331,40 +1332,38 @@ if st.session_state.phase == "auth":
     )
 
     if st.button("Başlayalım"):
-    if not u or not selected_id:
-        st.warning("Lütfen öğrenci kodunu yaz ve bir metin seç.")
-    else:
-        old_user = u
-        old_metin_id = selected_id
+        if not u or not selected_id:
+            st.warning("Lütfen öğrenci kodunu yaz ve bir metin seç.")
+        else:
+            old_user = u
+            old_metin_id = selected_id
 
-        st.session_state.clear()
+            st.session_state.clear()
 
-        st.session_state.user = old_user
-        st.session_state.metin_id = old_metin_id
-        st.session_state.session_id = str(uuid.uuid4())[:8]
-        st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
+            st.session_state.user = old_user
+            st.session_state.metin_id = old_metin_id
+            st.session_state.session_id = str(uuid.uuid4())[:8]
+            st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
 
-        reset_activity_states()
+            reset_activity_states()
 
-        activity, err = load_activity_from_bank(selected_id)
-        if activity is None:
-            st.error(f"❌ Yüklenemedi: {err}")
-            st.stop()
+            activity, err = load_activity_from_bank(selected_id)
+            if activity is None:
+                st.error(f"❌ Yüklenemedi: {err}")
+                st.stop()
 
-        st.session_state.activity = activity
-        st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
-        st.session_state.p_idx = 0
-        st.session_state.hints = 0
-        st.session_state.start_t = time.time()
-        st.session_state.saved_perf = False
+            st.session_state.activity = activity
+            st.session_state.paragraphs = split_paragraphs(activity.get("sade_metin", ""))
+            st.session_state.p_idx = 0
+            st.session_state.hints = 0
+            st.session_state.start_t = time.time()
+            st.session_state.saved_perf = False
 
-        save_reading_process("SESSION_START", f"Metin yüklendi: {selected_id}", paragraf_no=None)
-        save_session_snapshot(force=True)
+            save_reading_process("SESSION_START", f"Metin yüklendi: {selected_id}", paragraf_no=None)
+            save_session_snapshot(force=True)
 
-        st.session_state.phase = "pre"
-        st.rerun()
-
-# =========================================================
+            st.session_state.phase = "pre"
+            st.rerun()
 # 2) PRE
 # =========================================================
 elif st.session_state.phase == "pre":
