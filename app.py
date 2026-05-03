@@ -1596,11 +1596,12 @@ elif st.session_state.phase == "post":
 
     if difficulty == "Evet":
         st.markdown("<div class='card'><b>Zorlandığında ne yaptın?</b></div>", unsafe_allow_html=True)
-        r1 = st.text_input(
+        r1 = st.text_area(
             "Kısa yaz",
-            value=st.session_state.get("reflection_strategy", ""),
-            key="reflection_strategy_input",
-        )
+            key=f"reflection_strategy_area_{sid}",
+            placeholder="Cevabını buraya yaz",
+            height=80,
+)
         st.session_state.reflection_strategy = (r1 or "").strip()
         maybe_log_once(
             "reflection_strategy_auto",
@@ -1612,11 +1613,14 @@ elif st.session_state.phase == "post":
         st.session_state.reflection_strategy = ""
 
     st.markdown("<div class='card'><b>Okurken sana en çok ne yardımcı oldu?</b></div>", unsafe_allow_html=True)
-    r2 = st.text_input(
+    sid = st.session_state.get("session_id", "")
+
+    r2 = st.text_area(
         "Kısa yaz",
-        value=st.session_state.get("reflection_next_time", ""),
-        key="reflection_next_input",
-    )
+        key=f"reflection_next_area_{sid}",
+        placeholder="Cevabını buraya yaz",
+        height=80,
+)
     st.session_state.reflection_next_time = (r2 or "").strip()
     maybe_log_once(
         "reflection_next_auto",
