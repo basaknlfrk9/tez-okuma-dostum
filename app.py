@@ -1276,7 +1276,6 @@ if st.session_state.phase != "auth":
 
 
 # =========================================================
-# =========================================================
 # 1) AUTH
 # =========================================================
 if st.session_state.phase == "auth":
@@ -1303,14 +1302,8 @@ if st.session_state.phase == "auth":
         st.markdown("<div class='info-pill'>❓ Soruları çözeceksin</div>", unsafe_allow_html=True)
         st.markdown("<div class='info-pill'>🗺️ Öykü haritası oluşturacaksın</div>", unsafe_allow_html=True)
 
-    login_key = f"student_code_{uuid.uuid4().hex[:8]}"
+    u = st.text_input("Öğrenci Kodun")
 
-    u = st.text_area(
-        "Öğrenci Kodun",
-        key=login_key,
-        placeholder="Öğrenci kodunu yaz",
-        height=70,
-)
     try:
         metin_ids_all = list_metin_ids()
     except Exception:
@@ -1341,13 +1334,8 @@ if st.session_state.phase == "auth":
         if not u or not selected_id:
             st.warning("Lütfen öğrenci kodunu yaz ve bir metin seç.")
         else:
-            old_user = u
-            old_metin_id = selected_id
-
-            st.session_state.clear()
-
-            st.session_state.user = old_user
-            st.session_state.metin_id = old_metin_id
+            st.session_state.user = u
+            st.session_state.metin_id = selected_id
             st.session_state.session_id = str(uuid.uuid4())[:8]
             st.session_state.login_time = datetime.now(ZoneInfo("Europe/Istanbul")).strftime("%d.%m.%Y %H:%M")
 
@@ -1370,7 +1358,8 @@ if st.session_state.phase == "auth":
 
             st.session_state.phase = "pre"
             st.rerun()
-# =========================================================
+
+
 # =========================================================
 # 2) PRE
 # =========================================================
@@ -1387,19 +1376,10 @@ elif st.session_state.phase == "pre":
             unsafe_allow_html=True,
         )
 
-    prediction_key = f"prediction_area_{st.session_state.get('session_id', '')}"
-
-    if prediction_key not in st.session_state:
-        st.session_state[prediction_key] = ""
-
-    curiosity = st.text_area(
+    curiosity = st.text_input(
         "Sence bu metin ne hakkında olabilir?",
-        key=prediction_key,
-        placeholder="Cevabını buraya yaz",
-        height=80,
+        value=st.session_state.prediction,
     )
-
-    st.session_state.prediction = curiosity.strip()
 
     speed = st.radio(
         "Okuma hızını seç",
@@ -1408,6 +1388,7 @@ elif st.session_state.phase == "pre":
         key="reading_speed_radio_pre",
     )
 
+    st.session_state.prediction = curiosity.strip()
     st.session_state.reading_speed = speed if speed else ""
 
     maybe_log_once("pre_prediction", "PRE_PREDICTION_AUTO", st.session_state.prediction, paragraf_no=None)
@@ -1426,6 +1407,8 @@ elif st.session_state.phase == "pre":
             save_checkpoint("PRE_TO_DURING")
             st.session_state.phase = "during"
             st.rerun()
+
+
 # =========================================================
 # 3) DURING
 # =========================================================
@@ -1489,46 +1472,22 @@ elif st.session_state.phase == "during":
     if p_idx == total_parts - 1:
         st.markdown("<div class='mini-success'>Metnin son bölümüne geldin.</div>", unsafe_allow_html=True)
 
-        sid = st.session_state.get("session_id", "")
-
-        # EN ÖNEMLİ ŞEY
         st.markdown("<div class='card'><b>Metindeki en önemli şey neydi?</b></div>", unsafe_allow_html=True)
-        final_note = st.text_area(
-            "Kısa yaz",
-            key=f"final_note_area_{sid}",
-            placeholder="Cevabını buraya yaz",
-            height=80,
-        )
+        final_note = st.text_input("Kısa yaz", value=st.session_state.final_important_note)
         st.session_state.final_important_note = final_note
-        maybe_log_once(
-            "important_note_auto",
-            "IMPORTANT_NOTE_FINAL_AUTO",
-            final_note.strip(),
-            paragraf_no=None,
-        )
+        maybe_log_once("important_note_auto", "IMPORTANT_NOTE_FINAL_AUTO", final_note.strip(), paragraf_no=None)
 
-        # ÖN BİLGİ
         st.markdown("<div class='card'><b>Bu metin sana daha önce bildiğin bir şeyi hatırlattı mı?</b></div>", unsafe_allow_html=True)
-        pk = st.text_area(
-            "Varsa yaz",
-            key=f"prior_knowledge_area_{sid}",
-            height=90,
-        )
+        pk = st.text_area("Varsa yaz", value=st.session_state.prior_knowledge, height=90)
         st.session_state.prior_knowledge = pk.strip()
-        maybe_log_once(
-            "prior_knowledge_auto",
-            "PRIOR_KNOWLEDGE_AUTO",
-            pk.strip(),
-            paragraf_no=None,
-        )
+        maybe_log_once("prior_knowledge_auto", "PRIOR_KNOWLEDGE_AUTO", pk.strip(), paragraf_no=None)
 
-        # KELİME
         st.markdown("<div class='card'><b>Bilmediğin kelime var mı?</b></div>", unsafe_allow_html=True)
-        unknown_word = st.text_area(
+        unknown_word = st.text_input(
             "Kelime",
-            key=f"unknown_word_area_{sid}",
+            value="",
+            key="unknown_word_input_end",
             placeholder="Örneğin: cesaret",
-            height=70,
         )
 
         if st.button("Kelimeyi Açıkla", key="word_help_btn_end") and unknown_word.strip():
@@ -1547,6 +1506,11 @@ elif st.session_state.phase == "during":
             save_checkpoint("DURING_TO_POST")
             st.session_state.phase = "post"
             st.rerun()
+
+
+# =========================================================
+# 4) POST
+# =========================================================
 # 4) POST
 # =========================================================
 elif st.session_state.phase == "post":
@@ -1555,7 +1519,7 @@ elif st.session_state.phase == "post":
     st.subheader("Okuma Sonrası")
 
     metin = st.session_state.activity.get("sade_metin", "Metin yok.")
-    sid = st.session_state.get("session_id", "")
+
     st.markdown("<div class='card'><b>Metni 2–3 cümleyle anlat.</b></div>", unsafe_allow_html=True)
 
     voice_audio = st.audio_input("🎤 İstersen sesli anlat", key="summary_audio")
@@ -1602,12 +1566,11 @@ elif st.session_state.phase == "post":
 
     if difficulty == "Evet":
         st.markdown("<div class='card'><b>Zorlandığında ne yaptın?</b></div>", unsafe_allow_html=True)
-        r1 = st.text_area(
+        r1 = st.text_input(
             "Kısa yaz",
-            key=f"reflection_strategy_area_{sid}",
-            placeholder="Cevabını buraya yaz",
-            height=80,
-)
+            value=st.session_state.get("reflection_strategy", ""),
+            key="reflection_strategy_input",
+        )
         st.session_state.reflection_strategy = (r1 or "").strip()
         maybe_log_once(
             "reflection_strategy_auto",
@@ -1619,14 +1582,11 @@ elif st.session_state.phase == "post":
         st.session_state.reflection_strategy = ""
 
     st.markdown("<div class='card'><b>Okurken sana en çok ne yardımcı oldu?</b></div>", unsafe_allow_html=True)
-    sid = st.session_state.get("session_id", "")
-
-    r2 = st.text_area(
+    r2 = st.text_input(
         "Kısa yaz",
-        key=f"reflection_next_area_{sid}",
-        placeholder="Cevabını buraya yaz",
-        height=80,
-)
+        value=st.session_state.get("reflection_next_time", ""),
+        key="reflection_next_input",
+    )
     st.session_state.reflection_next_time = (r2 or "").strip()
     maybe_log_once(
         "reflection_next_auto",
@@ -1640,14 +1600,12 @@ elif st.session_state.phase == "post":
 
     sm = st.session_state.story_map.copy()
 
-    sid = st.session_state.get("session_id", "")
-
-    sm["kahraman"] = st.text_area("👤 Kahraman", key=f"story_kahraman_{sid}", height=70)
-    sm["mekan"] = st.text_area("🏠 Mekân", key=f"story_mekan_{sid}", height=70)
-    sm["zaman"] = st.text_area("🕒 Zaman", key=f"story_zaman_{sid}", height=70)
-    sm["problem"] = st.text_area("⚠️ Problem", key=f"story_problem_{sid}", height=70)
-    sm["olaylar"] = st.text_area("🔁 Olaylar", key=f"story_olaylar_{sid}", height=100)
-    sm["cozum"] = st.text_area("✅ Çözüm", key=f"story_cozum_{sid}", height=70)
+    sm["kahraman"] = st.text_input("👤 Kahraman", value=sm["kahraman"])
+    sm["mekan"] = st.text_input("🏠 Mekân", value=sm["mekan"])
+    sm["zaman"] = st.text_input("🕒 Zaman", value=sm["zaman"])
+    sm["problem"] = st.text_input("⚠️ Problem", value=sm["problem"])
+    sm["olaylar"] = st.text_area("🔁 Olaylar", value=sm["olaylar"], height=100)
+    sm["cozum"] = st.text_input("✅ Çözüm", value=sm["cozum"])
 
     st.session_state.story_map = sm
 
