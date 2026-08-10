@@ -650,14 +650,11 @@ Kurallar:
 - Doğru seçeneğin harfini söyleme.
 - Hangi seçeneğin doğru veya yanlış olduğunu söyleme.
 - Sadece "metne tekrar bak" gibi genel bir ipucu verme.
-- Öğrencinin metinde NEYİ araması gerektiğini söyle.
+- Öğrencinin metinde neyi araması gerektiğini söyle.
 - Sorunun hangi bilgiyle ilgili olduğunu açıklaştır.
-- Gerekirse ilgili kavramlara dikkat çek.
-- Doğru cevabı oluşturan kavramı doğrudan söyleme.
 - En fazla 2 kısa cümle kullan.
 - Basit ve açık Türkçe kullan.
 - Özel öğrenme güçlüğü olan ortaokul öğrencisine uygun yaz.
-- Tek seferde anlaşılır bir yönlendirme yap.
 """
 
     payload = {
@@ -675,7 +672,6 @@ Kurallar:
             model="gpt-4o-mini",
             temperature=0.2
         )
-
         return resp.choices[0].message.content.strip()
 
     except Exception:
@@ -683,7 +679,6 @@ Kurallar:
             "Metinde soruyla ilgili bilgilerin verildiği cümleyi bul. "
             "Oradaki bilgileri seçeneklerle karşılaştır."
         )
-
 
 def generate_ai_hint(
     metin: str,
