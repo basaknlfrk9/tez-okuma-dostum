@@ -629,7 +629,6 @@ Sadece JSON üret:
         return False
 
 def _safe_fallback_hint(metin: str, soru: dict, wrong_choice: str, level: int = 1):
-
     opts_payload = {}
 
     for k in ["A", "B", "C", "D"]:
@@ -643,40 +642,22 @@ okuduğunu anlama sorularında destek olan sabırlı bir öğretmensin.
 Öğrenci soruyu yanlış cevapladı.
 
 Görevin:
-Öğrenciye GENEL bir cümle vermek yerine,
+Öğrenciye genel bir cümle vermek yerine,
 metindeki ilgili bilgiye gerçekten yönlendiren kısa bir ipucu üretmek.
 
-ÇOK ÖNEMLİ:
+Kurallar:
 - Doğru cevabı söyleme.
 - Doğru seçeneğin harfini söyleme.
 - Hangi seçeneğin doğru veya yanlış olduğunu söyleme.
-- Ama "metne tekrar bak" gibi tek başına çok genel bir ipucu da verme.
+- Sadece "metne tekrar bak" gibi genel bir ipucu verme.
 - Öğrencinin metinde NEYİ araması gerektiğini söyle.
 - Sorunun hangi bilgiyle ilgili olduğunu açıklaştır.
-- Gerekirse metindeki iki veya üç ilgili kavrama dikkat çek.
-- Ancak eksik olan/doğru cevabı oluşturan kavramı söyleme.
-
-Örnek:
-
-Soru:
-"Sebzeler bitkinin hangi bölümünden oluşmaz?"
-
-Uygun:
-"Metinde sebzelerin bitkinin hangi bölümlerinden oluşabildiğinin
-anlatıldığı cümleyi bul. Orada verilen bölümleri seçeneklerle karşılaştır."
-
-Uygun değil:
-"Soruyu tekrar oku."
-
-Uygun değil:
-"Sebzeler çiçekten oluşmaz."
-
-ÖÖG öğrencisine uygun kurallar:
-- En fazla 2 kısa cümle.
-- Basit ve açık Türkçe.
-- Tek seferde bir işlem yaptır.
-- Karmaşık açıklama yapma.
-- Öğrencinin dikkatini metindeki ilgili bilgiye yönelt.
+- Gerekirse ilgili kavramlara dikkat çek.
+- Doğru cevabı oluşturan kavramı doğrudan söyleme.
+- En fazla 2 kısa cümle kullan.
+- Basit ve açık Türkçe kullan.
+- Özel öğrenme güçlüğü olan ortaokul öğrencisine uygun yaz.
+- Tek seferde anlaşılır bir yönlendirme yap.
 """
 
     payload = {
@@ -684,7 +665,7 @@ Uygun değil:
         "soru": soru.get("kok", ""),
         "seçenekler": opts_payload,
         "ogrencinin_secimi": wrong_choice,
-        "ipucu_seviyesi": level
+        "ipucu_seviyesi": level,
     }
 
     try:
@@ -919,7 +900,7 @@ Kurallar:
 - Sonra sadece 1 küçük geliştirme önerisi ver.
 - Sade ve anlaşılır kelimeler kullan.
 - Nazik ve destekleyici ol.
-"""
+    """
     payload = {
         "metin": (metin or "")[:2500],
         "ogrenci_ozeti": (ozet or "")[:1000],
