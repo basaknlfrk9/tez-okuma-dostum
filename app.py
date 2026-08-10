@@ -568,7 +568,8 @@ def _ai_hint_leak_check(
     İpucu doğru cevabı başka kelimelerle veya cümle içinde
     açığa çıkarıyor mu diye ikinci bir AI kontrolü yapar.
     """
-sys = """
+
+    sys = """
 Sen eğitimsel ipuçlarını kontrol eden bir denetleyicisin.
 
 Amaç:
@@ -620,14 +621,10 @@ Sadece JSON üret:
         )
 
         data = json.loads(resp.choices[0].message.content)
-
         return bool(data.get("leak", False))
 
     except Exception:
-        # AI kontrolü çalışmazsa sistem tamamen durmasın.
-        # İlk güvenlik kontrolünün sonucuyla devam edilir.
         return False
-
 def _safe_fallback_hint(metin: str, soru: dict, wrong_choice: str, level: int = 1):
     opts_payload = {}
 
@@ -875,12 +872,13 @@ Dil kuralları:
     # 3 DENEME DE BAŞARISIZSA GÜVENLİ HAZIR İPUCU
     # ---------------------------------------------------------
 
-   return _safe_fallback_hint(
-    metin,
-    soru,
-    wrong_choice,
-    level
-)
+      # 3 deneme de başarısızsa güvenli yönlendirme üret
+    return _safe_fallback_hint(
+        metin,
+        soru,
+        wrong_choice,
+        level
+    )
 
 
 def generate_summary_feedback(metin: str, ozet: str):
