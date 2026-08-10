@@ -568,28 +568,39 @@ def _ai_hint_leak_check(
     İpucu doğru cevabı başka kelimelerle veya cümle içinde
     açığa çıkarıyor mu diye ikinci bir AI kontrolü yapar.
     """
+sys = """
+Sen eğitimsel ipuçlarını kontrol eden bir denetleyicisin.
 
-    sys = """
-Sen bir eğitimsel ipucu güvenlik denetleyicisisin.
+Amaç:
+İpucu öğrenciyi metindeki ilgili bilgiye yönlendirebilir.
+Bu TEK BAŞINA cevap sızıntısı değildir.
 
-Görevin:
-Bir öğrenciye verilen ipucunun, sorunun doğru cevabını
-doğrudan veya dolaylı biçimde açığa çıkarıp çıkarmadığını belirlemek.
+SADECE şu durumlarda leak=true ver:
 
-ÖNEMLİ:
-- İpucu öğrencinin düşünmesini sağlamalıdır.
-- Doğru cevabı söylememelidir.
-- Doğru cevabı bir cümlenin içinde kullanmak da cevap vermektir.
-- Doğru cevabın eş anlamlısını açık biçimde söylemek de cevap vermektir.
-- Metinde nereye bakacağını söylemek uygundur.
-- Hangi işlemi yapacağını söylemek uygundur.
-- Sorudaki anahtar kelimeye dikkat çekmek uygundur.
-- Seçenekleri karşılaştırmasını istemek uygundur.
+1. İpucu doğru cevabı açıkça söylüyorsa.
+2. Doğru cevabın eş anlamlısını açıkça söylüyorsa.
+3. Doğru seçeneğin harfini söylüyorsa.
+4. "X değildir", "cevap X'tir" gibi ifadelerle cevabı tamamlıyorsa.
+5. Öğrencinin düşünmesine gerek kalmadan cevabı kesin olarak ortaya koyuyorsa.
+
+Şunlar cevap sızıntısı DEĞİLDİR:
+
+- Metindeki ilgili cümleye yönlendirmek.
+- Sorunun hangi bilgiyle ilgili olduğunu söylemek.
+- Metindeki kavramları bulmasını istemek.
+- Karşılaştırma yapmasını istemek.
+- Sorudaki "değildir", "neden", "kim", "nerede" gibi kelimelere dikkat çekmek.
+- Metinde doğru cevap dışındaki bazı ilgili kavramları hatırlatmak.
+- Öğrenciye eleme stratejisi önermek.
+
+Önemli:
+Bir ipucunu sadece "cevaba yardımcı oluyor" diye sızıntı sayma.
+İpucunun görevi zaten öğrenciyi cevaba yaklaştırmaktır.
 
 Sadece JSON üret:
 
 {
-  "leak": true,
+  "leak": false,
   "reason": "kısa gerekçe"
 }
 """
@@ -617,29 +628,79 @@ Sadece JSON üret:
         # İlk güvenlik kontrolünün sonucuyla devam edilir.
         return False
 
+def _safe_fallback_hint(metin: str, soru: dict, wrong_choice: str, level: int = 1):
 
-def _safe_fallback_hint(level: int = 1) -> str:
-    """
-    Model güvenli bir ipucu üretemezse kullanılacak
-    cevap içermeyen hazır ipuçları.
-    """
+    opts_payload = {}
 
-    if level == 1:
-        return (
-            "Soruyla ilgili bölümü metinde tekrar bul. "
-            "O bölümü dikkatlice oku."
+    for k in ["A", "B", "C", "D"]:
+        if soru.get(k):
+            opts_payload[k] = soru.get(k)
+
+    sys = """
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencisine
+okuduğunu anlama sorularında destek olan sabırlı bir öğretmensin.
+
+Öğrenci soruyu yanlış cevapladı.
+
+Görevin:
+Öğrenciye GENEL bir cümle vermek yerine,
+metindeki ilgili bilgiye gerçekten yönlendiren kısa bir ipucu üretmek.
+
+ÇOK ÖNEMLİ:
+- Doğru cevabı söyleme.
+- Doğru seçeneğin harfini söyleme.
+- Hangi seçeneğin doğru veya yanlış olduğunu söyleme.
+- Ama "metne tekrar bak" gibi tek başına çok genel bir ipucu da verme.
+- Öğrencinin metinde NEYİ araması gerektiğini söyle.
+- Sorunun hangi bilgiyle ilgili olduğunu açıklaştır.
+- Gerekirse metindeki iki veya üç ilgili kavrama dikkat çek.
+- Ancak eksik olan/doğru cevabı oluşturan kavramı söyleme.
+
+Örnek:
+
+Soru:
+"Sebzeler bitkinin hangi bölümünden oluşmaz?"
+
+Uygun:
+"Metinde sebzelerin bitkinin hangi bölümlerinden oluşabildiğinin
+anlatıldığı cümleyi bul. Orada verilen bölümleri seçeneklerle karşılaştır."
+
+Uygun değil:
+"Soruyu tekrar oku."
+
+Uygun değil:
+"Sebzeler çiçekten oluşmaz."
+
+ÖÖG öğrencisine uygun kurallar:
+- En fazla 2 kısa cümle.
+- Basit ve açık Türkçe.
+- Tek seferde bir işlem yaptır.
+- Karmaşık açıklama yapma.
+- Öğrencinin dikkatini metindeki ilgili bilgiye yönelt.
+"""
+
+    payload = {
+        "metin": (metin or "")[:2500],
+        "soru": soru.get("kok", ""),
+        "seçenekler": opts_payload,
+        "ogrencinin_secimi": wrong_choice,
+        "ipucu_seviyesi": level
+    }
+
+    try:
+        resp = openai_text_request(
+            sys,
+            json.dumps(payload, ensure_ascii=False),
+            model="gpt-4o-mini",
+            temperature=0.2
         )
 
-    elif level == 2:
-        return (
-            "Sorudaki önemli kelimelere dikkat et. "
-            "Metindeki bilgilerle seçenekleri karşılaştır."
-        )
+        return resp.choices[0].message.content.strip()
 
-    else:
+    except Exception:
         return (
-            "Sorunun senden ne istediğine tekrar bak. "
-            "Metinde verilen bilgilerden hangisinin seçeneklerle uyuşmadığını düşün."
+            "Metinde soruyla ilgili bilgilerin verildiği cümleyi bul. "
+            "Oradaki bilgileri seçeneklerle karşılaştır."
         )
 
 
@@ -838,7 +899,12 @@ Dil kuralları:
     # 3 DENEME DE BAŞARISIZSA GÜVENLİ HAZIR İPUCU
     # ---------------------------------------------------------
 
-    return _safe_fallback_hint(level)
+   return _safe_fallback_hint(
+    metin,
+    soru,
+    wrong_choice,
+    level
+)
 
 
 def generate_summary_feedback(metin: str, ozet: str):
