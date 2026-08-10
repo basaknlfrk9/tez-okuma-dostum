@@ -492,57 +492,353 @@ def transcribe_audio_bytes(audio_bytes: bytes) -> str:
 # CHATBOT / FEEDBACK
 # =========================================================
 
+# =========================================================
+# GÜVENLİ İPUCU ÜRETİMİ
+# =========================================================
 
-def generate_ai_hint(metin: str, soru: dict, wrong_choice: str, level: int = 1):
+def _normalize_hint_text(text: str) -> str:
+    """
+    İpucu ile doğru cevap arasında doğrudan metinsel sızıntı
+    olup olmadığını kontrol etmek için metni sadeleştirir.
+    """
+    text = str(text or "").strip().lower()
+
+    tr_map = str.maketrans({
+        "ı": "i",
+        "ş": "s",
+        "ğ": "g",
+        "ü": "u",
+        "ö": "o",
+        "ç": "c"
+    })
+
+    text = text.translate(tr_map)
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
+
+
+def _direct_hint_leak_check(
+    hint: str,
+    correct_letter: str,
+    correct_text: str
+) -> bool:
+    """
+    Basit ve hızlı güvenlik kontrolü.
+
+    Örnek:
+    Doğru cevap = 'çiçeğinden'
+    İpucu = 'Sebzeler bitkinin çiçeğinden oluşmaz.'
+    -> True döndürür.
+    """
+
+    hint_n = _normalize_hint_text(hint)
+    answer_n = _normalize_hint_text(correct_text)
+    letter_n = str(correct_letter or "").strip().lower()
+
+    if not hint_n:
+        return True
+
+    # Doğru seçeneğin metni ipucunda doğrudan geçiyorsa
+    if answer_n and len(answer_n) >= 3 and answer_n in hint_n:
+        return True
+
+    # "Cevap C", "C seçeneği" gibi ifadeleri engelle
+    dangerous_patterns = [
+        rf"\bcevap\s+{re.escape(letter_n)}\b",
+        rf"\bdogru\s+cevap\s+{re.escape(letter_n)}\b",
+        rf"\b{re.escape(letter_n)}\s+secenegi\b",
+        rf"\bsecenek\s+{re.escape(letter_n)}\b",
+    ]
+
+    for pattern in dangerous_patterns:
+        if letter_n and re.search(pattern, hint_n):
+            return True
+
+    return False
+
+
+def _ai_hint_leak_check(
+    question: str,
+    hint: str,
+    correct_text: str
+) -> bool:
+    """
+    İpucu doğru cevabı başka kelimelerle veya cümle içinde
+    açığa çıkarıyor mu diye ikinci bir AI kontrolü yapar.
+    """
+
+    sys = """
+Sen bir eğitimsel ipucu güvenlik denetleyicisisin.
+
+Görevin:
+Bir öğrenciye verilen ipucunun, sorunun doğru cevabını
+doğrudan veya dolaylı biçimde açığa çıkarıp çıkarmadığını belirlemek.
+
+ÖNEMLİ:
+- İpucu öğrencinin düşünmesini sağlamalıdır.
+- Doğru cevabı söylememelidir.
+- Doğru cevabı bir cümlenin içinde kullanmak da cevap vermektir.
+- Doğru cevabın eş anlamlısını açık biçimde söylemek de cevap vermektir.
+- Metinde nereye bakacağını söylemek uygundur.
+- Hangi işlemi yapacağını söylemek uygundur.
+- Sorudaki anahtar kelimeye dikkat çekmek uygundur.
+- Seçenekleri karşılaştırmasını istemek uygundur.
+
+Sadece JSON üret:
+
+{
+  "leak": true,
+  "reason": "kısa gerekçe"
+}
+"""
+
+    payload = {
+        "soru": question,
+        "ipucu": hint,
+        "dogru_cevap_metni": correct_text
+    }
+
+    try:
+        resp = openai_json_request(
+            sys,
+            json.dumps(payload, ensure_ascii=False),
+            model="gpt-4o-mini",
+            temperature=0
+        )
+
+        data = json.loads(resp.choices[0].message.content)
+
+        return bool(data.get("leak", False))
+
+    except Exception:
+        # AI kontrolü çalışmazsa sistem tamamen durmasın.
+        # İlk güvenlik kontrolünün sonucuyla devam edilir.
+        return False
+
+
+def _safe_fallback_hint(level: int = 1) -> str:
+    """
+    Model güvenli bir ipucu üretemezse kullanılacak
+    cevap içermeyen hazır ipuçları.
+    """
+
+    if level == 1:
+        return (
+            "Soruyla ilgili bölümü metinde tekrar bul. "
+            "O bölümü dikkatlice oku."
+        )
+
+    elif level == 2:
+        return (
+            "Sorudaki önemli kelimelere dikkat et. "
+            "Metindeki bilgilerle seçenekleri karşılaştır."
+        )
+
+    else:
+        return (
+            "Sorunun senden ne istediğine tekrar bak. "
+            "Metinde verilen bilgilerden hangisinin seçeneklerle uyuşmadığını düşün."
+        )
+
+
+def generate_ai_hint(
+    metin: str,
+    soru: dict,
+    wrong_choice: str,
+    level: int = 1
+):
+    """
+    Güvenli ve kademeli AI ipucu üretir.
+
+    1. düzey: Metne yönlendirme
+    2. düzey: Anahtar bilgiye dikkat çekme
+    3. düzey: Çözüm stratejisini belirginleştirme
+
+    Hiçbir düzeyde doğru cevap verilmez.
+    """
+
     opts_payload = {}
+
     for k in ["A", "B", "C", "D"]:
         if soru.get(k):
             opts_payload[k] = soru.get(k)
 
+    correct_letter = str(soru.get("dogru", "")).strip().upper()
+    correct_text = str(
+        soru.get(correct_letter, "")
+    ).strip()
+
+    wrong_letter = str(wrong_choice or "").strip().upper()
+
+    # Öğrencinin seçtiği yanlış seçeneğin metni
+    wrong_text = opts_payload.get(
+        wrong_letter,
+        str(wrong_choice or "")
+    )
+
+    # ---------------------------------------------------------
+    # İPUCU DÜZEYİ
+    # ---------------------------------------------------------
+
     if level == 1:
+
         level_instruction = """
-- Çok kısa ve genel bir ipucu ver.
-- Öğrenciyi metindeki ilgili bölüme yönlendir.
-- Cevabı söyleme.
+Bu 1. düzey ipucudur.
+
+- Sadece öğrenciyi metindeki ilgili bölüme yönlendir.
+- Öğrencinin hangi bilgiye bakması gerektiğini genel olarak söyle.
+- Seçeneklerden hiçbirini açıklama.
+- Doğru cevabı veya doğru cevabın içeriğini söyleme.
+- Cevaba çok yaklaşma.
 """
+
     elif level == 2:
+
         level_instruction = """
-- Biraz daha açık ipucu ver.
-- Yine cevabı söyleme.
-- Dikkat etmesi gereken kelime ya da cümleyi sezdir.
+Bu 2. düzey ipucudur.
+
+- Öğrencinin dikkat etmesi gereken soru kelimesini,
+  ilişkiyi veya metindeki bilgi türünü fark ettir.
+- Bir düşünme stratejisi öner.
+- Doğru cevabı söyleme.
+- Doğru cevabı cümle içinde kullanma.
+- Hangi seçeneğin doğru veya yanlış olduğunu söyleme.
 """
+
     else:
+
         level_instruction = """
-- En açık ipucunu ver.
-- Ama doğru seçeneği doğrudan söyleme.
-- Öğrenciyi cevaba çok yaklaştır.
+Bu 3. düzey ipucudur.
+
+- Öğrenciye çözüm yolunu daha açık biçimde göster.
+- Metindeki bilgileri seçeneklerle nasıl karşılaştıracağını söyle.
+- Sorudaki olumlu/olumsuz ifadeye dikkat çekebilirsin.
+- Ama doğru cevabı ASLA söyleme.
+- Doğru cevabı başka bir cümlenin içinde de kullanma.
+- Doğru seçeneğin harfini söyleme.
+- Bir seçeneği eleyerek cevabı doğrudan belli etme.
 """
 
     sys = f"""
-Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine destek olan sabırlı bir okuma öğretmenisin.
+Sen özel öğrenme güçlüğü yaşayan ortaokul öğrencilerine
+destek olan sabırlı bir okuma öğretmenisin.
 
-Kurallar:
+Görevin öğrencinin yerine soruyu çözmek DEĞİL,
+öğrencinin soruyu kendisinin çözmesine yardımcı olmaktır.
+
+TEMEL KURAL:
+İPUCU, CEVAP DEĞİLDİR.
+
+Kesinlikle yapmaman gerekenler:
+
+- Doğru cevabı söyleme.
+- Doğru seçeneğin harfini söyleme.
+- Doğru cevabın metnini ipucunun içine yazma.
+- "X değildir", "X olur", "X'tir" gibi bir cümle kurarak
+  cevabı açıklama.
+- Bir seçeneğin kesin doğru olduğunu söyleme.
+- Bir seçeneğin kesin yanlış olduğunu söyleyerek cevabı belli etme.
+- Sorunun cevabını öğrenci adına çıkarma.
+
+Yapabileceklerin:
+
+- Metindeki ilgili bölüme yönlendirmek.
+- Sorudaki anahtar kelimeye dikkat çekmek.
+- "Kim?", "Nerede?", "Neden?", "Hangisi değildir?"
+  gibi soru ifadelerini fark ettirmek.
+- Metindeki bilgileri yeniden okumasını istemek.
+- Seçeneklerle metindeki bilgileri karşılaştırmasını istemek.
+- Eleme, karşılaştırma ve yeniden okuma stratejisi önermek.
+
+Dil kuralları:
+
 - Türkçe yaz.
-- Kısa yaz.
+- ÖÖG olan ortaokul öğrencisine uygun yaz.
 - En fazla 2 kısa cümle kullan.
-- Zor kelime kullanma.
+- Basit kelimeler kullan.
 - Karmaşık cümle kurma.
-- Cevabı doğrudan verme.
-- Öğrenciyi korkutma, yargılama.
-- Nazik ve destekleyici ol.
-- Metindeki ilgili yere yönlendir.
+- Nazik ol.
+- Sadece ipucunu yaz.
+
 {level_instruction}
 """
-    payload = {
-        "metin": (metin or "")[:2500],
-        "soru": soru.get("kok", ""),
-        "seçenekler": opts_payload,
-        "ogrencinin_secimi": wrong_choice,
-        "dogru_cevap": soru.get("dogru", ""),
-        "ipucu_seviyesi": level,
-    }
-    resp = openai_text_request(sys, json.dumps(payload, ensure_ascii=False), temperature=0.2)
-    return resp.choices[0].message.content.strip()
+
+    # ---------------------------------------------------------
+    # EN FAZLA 3 KEZ GÜVENLİ İPUCU ÜRETMEYİ DENE
+    # ---------------------------------------------------------
+
+    for attempt in range(3):
+
+        payload = {
+            "metin": (metin or "")[:2500],
+            "soru": soru.get("kok", ""),
+
+            # Doğru cevap modele GÖNDERİLMİYOR.
+            # Sadece öğrencinin yanlış seçimi veriliyor.
+            "ogrencinin_yanlis_secimi": wrong_text,
+
+            "ipucu_seviyesi": level,
+
+            "ek_guvenlik": (
+                "Sorunun cevabını çıkarma. "
+                "Sadece öğrencinin cevabı kendisinin bulmasını sağlayacak "
+                "bir düşünme veya yeniden okuma yönlendirmesi üret."
+            )
+        }
+
+        # İkinci ve üçüncü denemede modele ekstra uyarı
+        if attempt > 0:
+            payload["yeniden_uretme_uyarisi"] = (
+                "Önceki ipucu doğru cevabı fazla belli etmiş olabilir. "
+                "Bu kez daha dolaylı, süreç odaklı ve cevap içermeyen "
+                "bir ipucu üret."
+            )
+
+        resp = openai_text_request(
+            sys,
+            json.dumps(payload, ensure_ascii=False),
+            model="gpt-4o-mini",
+            temperature=0.2
+        )
+
+        hint = resp.choices[0].message.content.strip()
+
+        # -----------------------------------------------------
+        # 1. KONTROL: DOĞRUDAN CEVAP SIZINTISI
+        # -----------------------------------------------------
+
+        direct_leak = _direct_hint_leak_check(
+            hint,
+            correct_letter,
+            correct_text
+        )
+
+        if direct_leak:
+            continue
+
+        # -----------------------------------------------------
+        # 2. KONTROL: ANLAMSAL CEVAP SIZINTISI
+        # -----------------------------------------------------
+
+        semantic_leak = _ai_hint_leak_check(
+            soru.get("kok", ""),
+            hint,
+            correct_text
+        )
+
+        if semantic_leak:
+            continue
+
+        # İki kontrolden de geçti
+        return hint
+
+    # ---------------------------------------------------------
+    # 3 DENEME DE BAŞARISIZSA GÜVENLİ HAZIR İPUCU
+    # ---------------------------------------------------------
+
+    return _safe_fallback_hint(level)
 
 
 def generate_summary_feedback(metin: str, ozet: str):
